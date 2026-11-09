@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot Station</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --text: #1d2330; --muted: #677085; --line: #e2e5eb;
+    --accent: #2f6fde; --ok: #1f9d55; --warn: #c98a12; --bad: #d64545; --chip: #eef1f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171c; --card: #1d2128; --text: #e6e9ef; --muted: #98a1b3; --line: #2c323c;
+            --accent: #5b8ff0; --ok: #3ccf7a; --warn: #e8b13a; --bad: #f06a6a; --chip: #262b34; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--card); }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  .pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--chip); color: var(--muted); }
+  .pill.enabled { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+  .pill.disabled { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+  .pill.fault, .pill.rec { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+  .pill.none { background: var(--chip); color: var(--muted); }
+  #conn { margin-left: auto; color: var(--muted); font-size: 12px; }
+  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; padding: 16px 20px; max-width: 1280px; margin: 0 auto; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  section.wide { grid-column: 1 / -1; }
+  h2 { font-size: 14px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  .muted { color: var(--muted); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+  button { font: inherit; padding: 6px 14px; border-radius: 7px; border: 1px solid var(--line); background: var(--chip); color: var(--text); cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--bad); }
+  button.rec { background: var(--bad); border-color: var(--bad); color: #fff; }
+  input[type=text] { font: inherit; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--text); flex: 1; min-width: 160px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.num, th.num { text-align: right; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; }
+  .kv div:nth-child(odd) { color: var(--muted); }
+  .err { color: var(--bad); }
+  .ok { color: var(--ok); }
+  .warn { color: var(--warn); }
+  .mark button { padding: 2px 8px; }
+  .mark button.on.yes { background: var(--ok); color: #fff; border-color: var(--ok); }
+  .mark button.on.no { background: var(--bad); color: #fff; border-color: var(--bad); }
+  td input[type=text] { width: 100%; padding: 3px 6px; }
+  #timer { font-size: 22px; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .later { color: var(--muted); font-size: 13px; }
+  @media (max-width: 560px) { main { padding: 12px; grid-template-columns: 1fr; } header { padding: 12px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Robot Station</h1>
+  <span id="state" class="pill none">no robot</span>
+  <span id="recpill" class="pill rec" hidden>● REC</span>
+  <span id="conn">connecting…</span>
+</header>
+<main>
+  <section>
+    <h2>Robot</h2>
+    <div class="kv" id="robotkv"></div>
+    <div class="row">
+      <button class="primary" id="enable">Enable</button>
+      <button id="disable">Disable</button>
+    </div>
+    <div class="muted" style="font-size:12px">Enable from the lobby (its Real robot section syncs first); here it enables only when the lobby's robot is already where the real one is.</div>
+    <table id="joints" style="margin-top:10px"></table>
+  </section>
+
+  <section>
+    <h2>Recording</h2>
+    <div class="row">
+      <input type="text" id="task" placeholder="Task, e.g. pick up the red cube and put it in the bowl">
+    </div>
+    <div class="row">
+      <button class="rec" id="start">● Start</button>
+      <button id="stop" disabled>■ Stop &amp; keep</button>
+      <button class="danger" id="discard" disabled>Discard</button>
+      <span id="timer" class="muted">0:00</span>
+    </div>
+    <div id="recmsg" class="muted"></div>
+    <table id="rates" style="margin-top:8px"></table>
+  </section>
+
+  <section class="wide">
+    <h2>Episodes <span class="muted" id="epcount"></span></h2>
+    <table id="episodes"></table>
+  </section>
+
+  <section>
+    <h2>Cameras</h2>
+    <div class="later">Coming next: add RealSense / USB cameras, preview them, record them with the robot.</div>
+  </section>
+  <section>
+    <h2>Convert</h2>
+    <div class="later">Coming next: episodes to a LeRobot dataset (resampled at a fixed fps, the cameras as video).</div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let ws, state = null, episodes = [];
+
+function connect() {
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws.onopen = () => { $('conn').textContent = 'connected'; };
+  ws.onclose = () => { $('conn').textContent = 'disconnected, retrying…'; setTimeout(connect, 1000); };
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'state') { state = m; drawState(); }
+    else if (m.type === 'episodes') { episodes = m.episodes; drawEpisodes(); }
+    else if (m.type === 'error') { flash(m.msg); }
+  };
+}
+const send = (op, args = {}) => ws?.readyState === 1 && ws.send(JSON.stringify({ op, ...args }));
+function flash(msg) { $('recmsg').innerHTML = `<span class="err">${esc(msg)}</span>`; }
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const fmtTime = (s) => s == null ? '–' : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const fmtSize = (b) => b > 1e9 ? (b / 1e9).toFixed(2) + ' GB' : b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : (b / 1e3).toFixed(0) + ' kB';
+
+function drawState() {
+  const r = state.robot, s = r ? r.state : 'none';
+  const pill = $('state');
+  pill.className = 'pill ' + s;
+  pill.textContent = r ? `${r.robot} · ${r.driver} · ${s}` : 'no robot (follower not running?)';
+  const age = state.target_age;
+  const lobby = !r ? '–' : r.lobby ? `connected (${r.lobby})` : 'not connected';
+  const rows = [
+    ['state', r ? `<b>${s}</b>${r.reason ? ' · ' + esc(r.reason) : ''}` : '–'],
+    ['lobby target', `${lobby}${age != null ? ` · ${age < 1 ? '<span class="ok">fresh</span>' : `<span class="warn">${age.toFixed(1)} s old</span>`}` : ''}`],
+    ['tracking error', r?.error != null ? `${r.error.toFixed(3)} rad` : '–'],
+    ['fault', r?.fault ? `<span class="err">${esc(r.fault)}</span>` : '–'],
+  ];
+  $('robotkv').innerHTML = rows.map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('');
+  $('enable').disabled = !r || s === 'enabled';
+  $('disable').disabled = !r || s === 'disabled';
+  const q = state.real ?? {};
+  const names = Object.keys(q);
+  $('joints').innerHTML = names.length ? '<tr><th>joint</th><th class="num">position</th></tr>' +
+    names.map((n) => `<tr><td>${esc(n)}</td><td class="num">${q[n].toFixed(4)}</td></tr>`).join('') : '';
+
+  const rec = state.recording;
+  $('recpill').hidden = !rec.recording;
+  $('start').disabled = rec.recording;
+  $('stop').disabled = $('discard').disabled = !rec.recording;
+  $('task').disabled = rec.recording;
+  $('timer').textContent = fmtTime(rec.elapsed ?? 0);
+  $('timer').className = rec.recording ? 'err' : 'muted';
+  if (rec.error) flash(rec.error);
+  else if (rec.recording) $('recmsg').innerHTML = `recording <b>${esc(rec.id)}</b>${rec.faults?.length ? ` · <span class="err">faults: ${esc(rec.faults.join('; '))}</span>` : ''}`;
+  else if (!$('recmsg').querySelector('.err')) $('recmsg').textContent = '';
+  const rates = state.rates ?? {};
+  $('rates').innerHTML = '<tr><th>recorded topic</th><th class="num">Hz</th></tr>' + rec.topics.map((t) => {
+    const hz = rates[t];
+    return `<tr><td>${esc(t)}</td><td class="num ${hz ? '' : 'muted'}">${hz != null ? hz.toFixed(1) : '–'}</td></tr>`;
+  }).join('');
+}
+
+function drawEpisodes() {
+  $('epcount').textContent = episodes.length ? `(${episodes.length})` : '';
+  if (!episodes.length) { $('episodes').innerHTML = '<tr><td class="muted">None yet.</td></tr>'; return; }
+  $('episodes').innerHTML = '<tr><th>episode</th><th>task</th><th class="num">duration</th><th class="num">messages</th><th class="num">size</th><th>result</th><th></th></tr>' +
+    episodes.map((e) => {
+      const msgs = Object.values(e.counts ?? {}).reduce((a, b) => a + b, 0);
+      const mark = (v, label, cls) => `<button class="${e.success === v ? 'on ' + cls : ''}" data-mark="${esc(e.id)}" data-v="${v}">${label}</button>`;
+      return `<tr>
+        <td>${esc(e.id)}${e.faults?.length ? ` <span class="err" title="${esc(e.faults.join('; '))}">⚠</span>` : ''}</td>
+        <td><input type="text" value="${esc(e.task)}" data-task="${esc(e.id)}" placeholder="(no task)"></td>
+        <td class="num">${fmtTime(e.duration)}</td><td class="num">${msgs}</td><td class="num">${fmtSize(e.size ?? 0)}</td>
+        <td class="mark">${mark(true, '✓', 'yes')} ${mark(false, '✗', 'no')}</td>
+        <td><button class="danger" data-del="${esc(e.id)}">Delete</button></td></tr>`;
+    }).join('');
+}
+
+$('enable').onclick = () => send('enable');
+$('disable').onclick = () => send('disable');
+$('start').onclick = () => { $('recmsg').textContent = ''; send('record_start', { task: $('task').value.trim() }); };
+$('stop').onclick = () => send('record_stop');
+$('discard').onclick = () => confirm('Discard this recording?') && send('record_discard');
+$('episodes').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.mark) {
+    const ep = episodes.find((x) => x.id === b.dataset.mark), v = b.dataset.v === 'true';
+    send('episode_update', { id: b.dataset.mark, success: ep?.success === v ? null : v });
+  } else if (b.dataset.del && confirm(`Delete episode ${b.dataset.del}?`)) {
+    send('episode_delete', { id: b.dataset.del });
+  }
+});
+$('episodes').addEventListener('change', (e) => {
+  if (e.target.dataset.task) send('episode_update', { id: e.target.dataset.task, task: e.target.value });
+});
+document.addEventListener('keydown', (e) => {  // space: start / stop (outside text fields)
+  if (e.code !== 'Space' || e.target.tagName === 'INPUT' || !state) return;
+  e.preventDefault();
+  (state.recording.recording ? $('stop') : $('start')).click();
+});
+connect();
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+# docker compose up --build        (./station.sh up: the same with your user's ids)
+#
+# The repository is mounted at /repo, so the code runs as it is here and the
+# episodes land in ./data. Host networking: rosbridge (ROSBRIDGE_PORT) and the
+# page (WEB_PORT) on this computer's addresses, the robot's FCI reachable.
+services:
+  station:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: robot-station
+    network_mode: host
+    ipc: host
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    # Real time for libfranka (the host's PREEMPT_RT kernel):
+    cap_add: [SYS_NICE]
+    ulimits:
+      rtprio: 99
+      memlock: -1
+    volumes:
+      - .:/repo
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+    command: >
+      ros2 launch launch/station.launch.py
+      robot:=${ROBOT:-panda} driver:=${DRIVER:-fake} ip:=${ROBOT_IP:-172.16.0.2}
+      speed:=${SPEED:-0.5} dynamics:=${DYNAMICS:-0.15} grasp_force:=${GRASP_FORCE:-20}
+      rosbridge_port:=${ROSBRIDGE_PORT:-9090} web_port:=${WEB_PORT:-8080} data:=/repo/data
+    # Cameras (next): RealSense and USB cameras re-enumerate, so all of /dev with
+    # the USB (189) and video4linux (81) devices allowed:
+    # devices: []
+    # volumes: [/dev:/dev]
+    # device_cgroup_rules: ['c 189:* rmw', 'c 81:* rmw']
