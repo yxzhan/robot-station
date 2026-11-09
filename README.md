@@ -13,6 +13,9 @@ robot-lobby (Quest / PC browser) ── rosbridge ──►  this computer (ROS 
                                                      web page :8080 ── recorder (rosbag2, mcap) ──► data/episodes/
 ```
 
+The step-by-step procedure on the real Panda (both the lobby teleop with recording and the
+giskard demo): [docs/TESTING_zh.md](docs/TESTING_zh.md).
+
 ## Run (Docker)
 
 On the robot's computer (a PREEMPT_RT kernel, Docker with compose):
@@ -47,7 +50,7 @@ section shows the real robot as a ghost; **Enable** syncs the lobby's robot to i
 one follows (in the Quest: the VR menu's Real robot). In a shared lobby world (server mode) the PC
 next to the robot does this while the Quest drives (robot-lobby's `real_robot/README.md`).
 
-The safety layer (`station/safety.py`): joint limits with a margin, the speed limit, enabling
+The safety layer (`robot_station/safety.py`): joint limits with a margin, the speed limit, enabling
 only near the target, holding when the targets stop (0.3 s), a fault when the robot falls
 0.5 rad behind or reports an error, disabled when no lobby publishes the target for 1 s.
 **Keep the physical E-stop at hand.**
@@ -74,15 +77,15 @@ JSON `{"op": "start", "task": "..."}`, `{"op": "stop"}`, `{"op": "discard"}`),
 
 ## giskardpy
 
-`python3 -m station.hw` is the same robot as ros2_control's hardware
+`python3 -m robot_station.hw` is the same robot as ros2_control's hardware
 (`topic_based_ros2_control`, velocity commanded arm, gripper action): ijcai_2026_workshop's
 `demo/panda_giskard`. It and the follower both drive the robot's FCI: one at a time.
 
 ## Debugging the Panda
 
 ```bash
-./station.sh run --rm station python3 -m station.debug_panda --ip 172.16.0.2 info   # read only
-./station.sh run --rm station python3 -m station.debug_panda --ip 172.16.0.2 gripper
+./station.sh run --rm station python3 -m robot_station.debug_panda --ip 172.16.0.2 info   # read only
+./station.sh run --rm station python3 -m robot_station.debug_panda --ip 172.16.0.2 gripper
 ```
 
 checks franky's versions, the robot's state, the hand (homing, open, close: return values and
@@ -101,13 +104,13 @@ ROS and checks the bag.
 ## Layout
 
 ```
-station/follower.py   the real robot following the lobby (ROS node, control thread)
-station/hw.py         the same as ros2_control hardware (giskard)
-station/safety.py     limits, speed, start tolerance, timeouts, falling behind
-station/drivers/      per robot: spec and driver (panda: franky; fake; so101: to do)
-station/recorder.py   episodes: ros2 bag record, meta.json
-station/web.py        the page's server (aiohttp) and its ROS node
-station/static/       the page
+robot_station/follower.py   the real robot following the lobby (ROS node, control thread)
+robot_station/hw.py         the same as ros2_control hardware (giskard)
+robot_station/safety.py     limits, speed, start tolerance, timeouts, falling behind
+robot_station/drivers/      per robot: spec and driver (panda: franky; fake; so101: to do)
+robot_station/recorder.py   episodes: ros2 bag record, meta.json
+robot_station/web.py        the page's server (aiohttp) and its ROS node
+robot_station/static/       the page
 launch/               rosbridge + follower + page
 docker/, docker-compose.yml, station.sh
 ```

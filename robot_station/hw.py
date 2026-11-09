@@ -1,4 +1,4 @@
-"""python3 -m station.hw --robot panda [--driver real|fake|lobby] ...
+"""python3 -m robot_station.hw --robot panda [--driver real|fake|lobby] ...
 
 The ROS 2 front end: a robot as the hardware of ros2_control's
 topic_based_ros2_control, its arm velocity commanded (forward_velocity_
@@ -251,7 +251,7 @@ class Ros2Front(Node):
 
 
 def main():
-  p = argparse.ArgumentParser(prog='python3 -m station.hw', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+  p = argparse.ArgumentParser(prog='python3 -m robot_station.hw', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
   p.add_argument('--robot', default='panda', choices=sorted(drivers.ROBOTS))
   p.add_argument('--driver', default='real', choices=['real', 'fake', 'lobby'])
   p.add_argument('--ns', help='topic namespace (default /<robot>/hw)')

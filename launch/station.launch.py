@@ -1,6 +1,6 @@
 """The station: rosbridge_server (the lobby connects to it: its ROS panel's
-Bridge, <this computer>:<rosbridge_port>), the follower (station/follower.py:
-the real robot follows the lobby's) and the web page (station/web.py:
+Bridge, <this computer>:<rosbridge_port>), the follower (robot_station/follower.py:
+the real robot follows the lobby's) and the web page (robot_station/web.py:
 http://<this computer>:<web_port>/, recording to <data>).
 
     ros2 launch launch/station.launch.py driver:=fake
@@ -20,7 +20,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 
 def generate_launch_description():
   args = [
-      ('robot', 'panda', 'the robot (station/drivers)'),
+      ('robot', 'panda', 'the robot (robot_station/drivers)'),
       ('driver', 'fake', 'real | fake'),
       ('ip', '172.16.0.2', 'Panda: its FCI address'),
       ('speed', '0.5', 'fraction of the joints\' max speeds commanded at most'),
@@ -36,7 +36,7 @@ def generate_launch_description():
       *[DeclareLaunchArgument(n, default_value=v, description=d) for n, v, d in args],
       Node(package='rosbridge_server', executable='rosbridge_websocket', output='screen',
            parameters=[{'port': C('rosbridge_port')}]),
-      py('station.follower', '--robot', C('robot'), '--driver', C('driver'), '--ip', C('ip'), '--speed', C('speed'),
+      py('robot_station.follower', '--robot', C('robot'), '--driver', C('driver'), '--ip', C('ip'), '--speed', C('speed'),
          '--dynamics', C('dynamics'), '--grasp-force', C('grasp_force')),
-      py('station.web', '--robot', C('robot'), '--driver', C('driver'), '--port', C('web_port'), '--data', C('data')),
+      py('robot_station.web', '--robot', C('robot'), '--driver', C('driver'), '--port', C('web_port'), '--data', C('data')),
   ])

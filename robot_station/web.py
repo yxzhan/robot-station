@@ -1,4 +1,4 @@
-"""python3 -m station.web --robot panda --data data --port 8080
+"""python3 -m robot_station.web --robot panda --data data --port 8080
 
 The station's web page (static/index.html) and what is behind it: one
 process with a ROS node (rclpy, its own thread) and an aiohttp server.
@@ -227,7 +227,7 @@ class WebServer:
 
 
 def main():
-  p = argparse.ArgumentParser(prog='python3 -m station.web', description=__doc__,
+  p = argparse.ArgumentParser(prog='python3 -m robot_station.web', description=__doc__,
                               formatter_class=argparse.RawDescriptionHelpFormatter)
   p.add_argument('--robot', default='panda')
   p.add_argument('--driver', default='', help='(for the episodes\' metadata)')

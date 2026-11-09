@@ -1,12 +1,12 @@
 """Checks a real Panda (and its hand) step by step, from franky up to the
 lobby's driver, to find where it goes wrong:
 
-    python3 -m station.debug_panda --ip 172.16.0.2                 # info: read only, nothing moves
-    python3 -m station.debug_panda --ip 172.16.0.2 gripper         # franky's Gripper directly: homing, open, close
-    python3 -m station.debug_panda --ip 172.16.0.2 driver          # PandaDriver's hand thread, as the bridge uses it
-    python3 -m station.debug_panda mapping                         # the lobby's finger value -> open / close (no robot)
-    python3 -m station.debug_panda --ip 172.16.0.2 arm             # a small move of joint 7 and back
-    python3 -m station.debug_panda --ip 172.16.0.2 all
+    python3 -m robot_station.debug_panda --ip 172.16.0.2                 # info: read only, nothing moves
+    python3 -m robot_station.debug_panda --ip 172.16.0.2 gripper         # franky's Gripper directly: homing, open, close
+    python3 -m robot_station.debug_panda --ip 172.16.0.2 driver          # PandaDriver's hand thread, as the bridge uses it
+    python3 -m robot_station.debug_panda mapping                         # the lobby's finger value -> open / close (no robot)
+    python3 -m robot_station.debug_panda --ip 172.16.0.2 arm             # a small move of joint 7 and back
+    python3 -m robot_station.debug_panda --ip 172.16.0.2 all
 
 Steps that move ask first (-y: do not ask). Every call is timed, its return
 value printed (franky's Gripper.move / grasp return False when they fail

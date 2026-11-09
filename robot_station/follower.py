@@ -1,4 +1,4 @@
-"""python3 -m station.follower --robot panda [--driver real|fake] ...
+"""python3 -m robot_station.follower --robot panda [--driver real|fake] ...
 
 A real robot following robot-lobby's robot: the lobby connects to this ROS
 through rosbridge_server (its ROS panel's Bridge) and publishes the robot's
@@ -207,7 +207,7 @@ def add_driver_args(p):
 
 
 def main():
-  p = argparse.ArgumentParser(prog='python3 -m station.follower', description=__doc__,
+  p = argparse.ArgumentParser(prog='python3 -m robot_station.follower', description=__doc__,
                               formatter_class=argparse.RawDescriptionHelpFormatter)
   add_driver_args(p)
   p.add_argument('--ns', help='topic namespace: the lobby robot\'s prefix (default /<robot>)')
