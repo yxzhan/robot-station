@@ -57,7 +57,7 @@ class FakeDriver(RobotDriver):
   def command_gripper(self, fraction):
     g = self.spec.gripper
     if g:
-      self.grip_target = g.value(round(fraction) if g.binary else fraction)
+      self.grip_target = g.value(g.snap(fraction))
 
   def hold(self):
     self.target = list(self.q)

@@ -22,7 +22,8 @@ class GripperSpec:
   joint: str              # the lobby's joint that stands for it (in joint states and commands)
   open: float             # that joint's value when open ...
   closed: float           # ... and closed
-  binary: bool = False    # the real gripper only opens or closes (the Panda hand: move vs grasp)
+  binary: bool = False    # the real gripper only opens or closes (the Panda hand: move vs grasp) ...
+  close_at: float = 0.5   # ... and closes from this fraction closed on, anything less is open
   mirror: list[str] = dataclasses.field(default_factory=list)  # lobby joints reported with the same value (the Panda's second finger)
 
   def fraction(self, value):
@@ -33,6 +34,10 @@ class GripperSpec:
   def value(self, fraction):
     """0 (open) .. 1 (closed) -> joint value."""
     return self.open + (self.closed - self.open) * min(1.0, max(0.0, fraction))
+
+  def snap(self, fraction):
+    """binary: 1.0 (closed) from close_at on, else 0.0 (open); otherwise fraction as it is."""
+    return (1.0 if fraction >= self.close_at else 0.0) if self.binary else fraction
 
 
 @dataclasses.dataclass
@@ -96,7 +101,7 @@ class RobotDriver(abc.ABC):
     """Moves the arm towards joint positions q (spec.joints' order)."""
 
   def command_gripper(self, fraction):
-    """0 open .. 1 closed (spec.gripper.binary: only past halfway counts)."""
+    """0 open .. 1 closed (spec.gripper.binary: open or closed, spec.gripper.snap)."""
 
   @abc.abstractmethod
   def hold(self):

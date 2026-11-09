@@ -115,7 +115,8 @@ class Ros2Front(Node):
     self.ns = (a.ns or f'/{a.robot}/hw').rstrip('/')
     opts = {'fake': {'lag': a.lag},
             'lobby': {'node': self, 'states': a.lobby_states, 'commands': a.lobby_commands},
-            'panda': {'ip': a.ip, 'dynamics': a.dynamics, 'grasp_force': a.grasp_force},
+            'panda': {'ip': a.ip, 'dynamics': a.dynamics, 'grasp_force': a.grasp_force,
+                      'controller': a.controller, 'stiffness': a.stiffness},
             'so101': {'port': a.serial, 'calibration': a.calibration}}
     if a.driver == 'lobby':
       self.driver = LobbyDriver(drivers.spec(a.robot), **opts['lobby'])
@@ -171,7 +172,7 @@ class Ros2Front(Node):
     cmd = handle.request.command
     pos = dict(zip(cmd.name, cmd.position)).get(g.joint, cmd.position[0] if cmd.position else g.open)
     self.grip_goal = g.fraction(pos)
-    want = g.value(round(self.grip_goal) if g.binary else self.grip_goal)
+    want = g.value(g.snap(self.grip_goal))
     t0 = last_move = time.monotonic()
     last = None
     result = ParallelGripperCommand.Result()
@@ -260,7 +261,9 @@ def main():
   p.add_argument('--speed', type=float, default=0.5, help='fraction of the joints\' max speeds commanded at most')
   p.add_argument('--timeout', type=float, default=0.3, help='s without velocity commands before the robot holds')
   p.add_argument('--ip', default='172.16.0.2', help='Panda: the robot\'s address (FCI)')
-  p.add_argument('--dynamics', type=float, default=0.15, help='Panda: franky\'s relative_dynamics_factor')
+  p.add_argument('--dynamics', type=float, default=0.15, help='Panda, position controller: franky\'s relative_dynamics_factor')
+  p.add_argument('--controller', default='impedance', choices=['impedance', 'position'], help='Panda: torque (joint impedance) or position control')
+  p.add_argument('--stiffness', type=float, default=1.0, help='Panda, impedance controller: its joint stiffness scaled by this')
   p.add_argument('--grasp-force', type=float, default=20.0, help='Panda: N')
   p.add_argument('--serial', default='/dev/ttyACM0', help='SO-101: the servo bus')
   p.add_argument('--calibration', help='SO-101: calibration file')

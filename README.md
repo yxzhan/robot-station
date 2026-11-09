@@ -34,7 +34,9 @@ after a change (only after a Dockerfile change).
 | `DRIVER` | `fake` | `real` or `fake` |
 | `ROBOT` / `ROBOT_IP` | `panda` / `172.16.0.2` | the robot, the Panda's FCI address |
 | `SPEED` | `0.5` | fraction of the joints' max speeds commanded at most |
-| `DYNAMICS` / `GRASP_FORCE` | `0.15` / `20` | Panda: franky's relative_dynamics_factor, N |
+| `CONTROLLER` | `impedance` | Panda: `impedance` (torque control, joint impedance tracking: tolerates lost packets) or `position` (franky's JointMotions) |
+| `STIFFNESS` | `1.0` | Panda, impedance: its joint stiffness scaled by this (softer below 1) |
+| `DYNAMICS` / `GRASP_FORCE` | `0.15` / `20` | Panda, position: franky's relative_dynamics_factor; N |
 | `ROSBRIDGE_PORT` / `WEB_PORT` | `9090` / `8080` | the lobby's Bridge, the station's page |
 | `ROS_DOMAIN_ID` | `0` | |
 
