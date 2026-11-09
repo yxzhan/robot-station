@@ -1,7 +1,7 @@
 """Franka Emika Panda (FER) through franky (github.com/TimSchneider42/franky),
 on libfranka 0.9.x: what Panda System 4.2.x speaks (libfranka >= 0.10 is
 for the FR3 only). franky's wheels are built per libfranka version: take the
-0.9.2 ones from its GitHub releases (see real_robot/README.md).
+0.9.2 ones from its GitHub releases (docker/Dockerfile installs one).
 
 Each command is an asynchronous JointMotion to the target: franky preempts
 the running one and plans the new one with Ruckig within the robot's limits

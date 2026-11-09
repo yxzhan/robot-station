@@ -43,7 +43,7 @@ class SO101Driver(RobotDriver):
     self.calibration = calibration
 
   def connect(self):
-    raise NotImplementedError('SO-101: the driver is not written yet (real_robot/drivers/so101.py has its plan)')
+    raise NotImplementedError('SO-101: the driver is not written yet (robot_station/drivers/so101.py has its plan)')
 
   def read(self):
     raise NotImplementedError

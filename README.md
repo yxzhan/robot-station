@@ -47,8 +47,18 @@ Without Docker (ROS 2 Jazzy, `python3-aiohttp`, `ros-jazzy-rosbridge-suite`,
 In the lobby: spawn the Franka Emika Panda (`aicor/franka_emika_panda`, profile prefix `panda`),
 in its ROS panel set **Bridge** to `<this computer>:9090` and tick the robot. Its **Real robot**
 section shows the real robot as a ghost; **Enable** syncs the lobby's robot to it and the real
-one follows (in the Quest: the VR menu's Real robot). In a shared lobby world (server mode) the PC
-next to the robot does this while the Quest drives (robot-lobby's `real_robot/README.md`).
+one follows (in the Quest: the VR menu's Real robot).
+
+In a shared lobby world (server mode: `npm run server`, every browser a client of one world), the
+robot and its real one are two jobs for two clients:
+
+- **The PC** next to the robot (a browser on `http://<lobby server>:<port>/`, no `?local`): in the
+  ROS panel, Bridge `<this computer>:9090` and the robot ticked. Its ROS is this browser's then
+  (one browser publishes a robot: the first to switch it on), so the real robot's targets go out
+  from here. **Enable** syncs the server's robot to the real one (the lobby server's op
+  `real_sync`) and enables once the synced pose has come back.
+- **The Quest** (the same address): drives the robot (IK markers, hands) as any client does; it
+  needs no bridge and does not care whether a real robot follows.
 
 The safety layer (`robot_station/safety.py`): joint limits with a margin, the speed limit, enabling
 only near the target, holding when the targets stop (0.3 s), a fault when the robot falls
@@ -115,5 +125,5 @@ launch/               rosbridge + follower + page
 docker/, docker-compose.yml, station.sh
 ```
 
-The drivers, the safety layer and `hw.py` came from robot-lobby's `real_robot/` (2026-11), where
-a ROS-free WebSocket version of the follower stays.
+The drivers, the safety layer, `hw.py` and `debug_panda.py` came from robot-lobby's `real_robot/`
+(2026-11), which this repository replaces.

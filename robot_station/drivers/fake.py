@@ -1,8 +1,8 @@
 """A stand-in for a real robot: follows its commands at its spec's joint
-speed limits, its gripper too, so the whole chain (lobby, bridge, safety
+speed limits, its gripper too, so the whole chain (lobby, follower, safety
 layer, ghost) runs without hardware:
 
-    python -m real_robot --robot panda --driver fake
+    ros2 launch launch/station.launch.py driver:=fake      (./station.sh up)
 
 `lag` (s) delays what it reports, like a slow network or controller."""
 
