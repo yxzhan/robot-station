@@ -49,8 +49,8 @@ Without Docker (ROS 2 Jazzy, `python3-aiohttp`, `ros-jazzy-rosbridge-suite`,
 ## Cameras
 
 Listed in `cameras.yaml` (copy `cameras.example.yaml`); each one a node publishing
-`/cameras/<name>/color/image_raw/compressed` (JPEG) and `.../camera_info`, recorded with the robot
-and previewed on the page. Restart the station after changing it.
+`/cameras/<name>/color/image_raw/compressed` (JPEG) and `.../camera_info`, recorded (ticked under
+Topics by default) and previewed on the page. Restart the station after changing it.
 
 | `type` | driver | which one |
 |---|---|---|
@@ -91,16 +91,21 @@ only near the target, holding when the targets stop (0.3 s), a fault when the ro
 The page (`http://<this computer>:8080/`):
 
 - **Robot**: state, the lobby's target (connected, fresh), the real joints; Enable / Disable.
-- **Recording**: a task, Start, Stop & keep, Discard (Space starts / stops); the recorded topics'
-  rates while it runs, faults seen.
+- **Recording**: a task, Start, Stop & keep, Discard (Space starts / stops); how many topics,
+  which are silent, faults seen. It records with or without a robot.
+- **Topics**: every topic in the ROS graph (the robot's, the cameras', the lobby's through
+  rosbridge: its `/tf`, its simulated cameras, …) with type, publishers and rate; the ticked ones
+  are recorded. A topic not published yet can be added by name (recorded once it appears). The
+  choice is kept in `data/record_topics.json`; by default the robot's topics and the cameras'
+  (a camera added later is ticked too).
 - **Episodes**: duration, messages, size; mark success ✓ / failure ✗, rename the task, delete.
 - **Cameras**: a live preview of each (MJPEG, `/camera/<name>.mjpg`, at most 10 fps), its rate
   against the configured fps.
 - **Convert**: next (episodes to a LeRobot dataset).
 
 Each episode is `data/episodes/<date-time>/` with `bag/` (rosbag2, mcap) and `meta.json` (task,
-robot, driver, topics, times, success, faults, the station's git commit). Recorded:
-`/panda/joint_states` (the lobby's target), `/panda/real/joint_states` (measured, with velocities
+robot, driver, topics, times, success, faults, the station's git commit, the recorded cameras).
+Recorded by default: `/panda/joint_states` (the lobby's target), `/panda/real/joint_states` (measured, with velocities
 and torques), `/panda/real/command` (what the robot was commanded after the safety layer: the
 action; the gripper open or closed), `/panda/real/status` and the cameras' compressed images and
 camera_info.

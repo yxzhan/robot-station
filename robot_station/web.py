@@ -5,9 +5,12 @@ process with a ROS node (rclpy, its own thread) and an aiohttp server.
 
   Robot      the follower's status, the real robot's joints, how fresh the
              lobby's target is; enable / disable (<ns>/real/enable)
-  Recording  episodes as rosbags of the robot's topics (recorder.py): start
-             with a task, stop (keep) or discard; the rates of the recorded
-             topics while it runs
+  Recording  episodes as rosbags (recorder.py): start with a task, stop
+             (keep) or discard; with or without a robot
+  Topics     every topic in the ROS graph (the station's, the cameras', the
+             lobby's through rosbridge, anything else), its type, publishers
+             and rate; ticked ones are recorded (the choice is kept in
+             <data>/record_topics.json; by default the robot's and cameras')
   Episodes   the recorded ones (data/episodes): mark success / failure,
              rename the task, delete
   Cameras    cameras.yaml's (cameras.py): a live preview of each, its rate;
@@ -21,8 +24,8 @@ rosbridge): /station/record/cmd (std_msgs/String, JSON {op: start, task} |
 The page talks JSON over a WebSocket (/ws): state pushes (type 'state',
 PUSH_S), the episode list when it changes (type 'episodes'), errors (type
 'error'); it sends {op: enable | disable | record_start {task} |
-record_stop | record_discard | episode_update {id, success?, task?, notes?}
-| episode_delete {id}}. The cameras' previews: GET /camera/<name>.mjpg
+record_stop | record_discard | topics_set {topics} | episode_update {id,
+success?, task?, notes?} | episode_delete {id}}. The cameras' previews: GET /camera/<name>.mjpg
 (MJPEG, at most PREVIEW_FPS).
 """
 
@@ -41,6 +44,7 @@ from aiohttp import WSMsgType, web
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rosidl_runtime_py.utilities import get_message
 from sensor_msgs.msg import CameraInfo, CompressedImage, JointState
 from std_msgs.msg import Bool, String
 
@@ -52,6 +56,7 @@ PUSH_S = 0.2       # state to the pages
 RATE_WINDOW = 2.0  # s over which topic rates are measured
 STALE_S = 1.5      # no follower status this long: none
 PREVIEW_FPS = 10   # the cameras' previews at most
+DISCOVER_S = 1.0   # the topic list refreshed
 
 
 class Rates:
@@ -91,7 +96,6 @@ class StationNode(Node):
     self.create_subscription(String, self.topics['status'], self.on_status, 10)
     self.create_subscription(JointState, self.topics['real'], self.on_real, 10)
     self.create_subscription(JointState, self.topics['target'], self.on_target, 10)
-    self.create_subscription(JointState, self.topics['command'], lambda m: self.rates.tick(self.topics['command']), 10)
     self.create_subscription(String, '/station/record/cmd', self.on_record_cmd, 10)
     self.create_timer(0.5, self.publish_record_status)
     # Cameras: the latest JPEG of each (the preview), every recorded topic's rate.
@@ -101,15 +105,37 @@ class StationNode(Node):
     for c in self.cams:
       self.create_subscription(CompressedImage, camera_config.color_topic(c), lambda m, c=c: self.on_frame(c, m),
                                qos_profile_sensor_data)
-      info = f'{camera_config.NS}/{c["name"]}/color/camera_info'
-      self.create_subscription(CameraInfo, info, lambda m, c=c, t=info: self.on_info(c, t, m), qos_profile_sensor_data)
-      if c['depth']:
-        t = camera_config.depth_topic(c)
-        self.create_subscription(CompressedImage, t, lambda m, t=t: self.rates.tick(t), qos_profile_sensor_data)
+      self.create_subscription(CameraInfo, f'{camera_config.NS}/{c["name"]}/color/camera_info',
+                               lambda m, c=c: self.on_info(c, m), qos_profile_sensor_data)
+    # Every topic: a raw subscription (no deserializing) counting its messages.
+    self.graph = {}    # topic: {type, pubs}
+    self.monitors = {}  # topic: its subscription (None: type unknown here)
+    self.create_timer(DISCOVER_S, self.discover)
     self.on_change = lambda: None  # (the web server: episodes changed)
 
+  def discover(self):
+    graph = {}
+    for name, types in self.get_topic_names_and_types():
+      if '/_' in name:  # (hidden: actions' and services' internals)
+        continue
+      graph[name] = {'type': types[0], 'pubs': self.count_publishers(name)}
+      if name not in self.monitors:
+        try:
+          cls = get_message(types[0])
+          self.monitors[name] = self.create_subscription(cls, name, lambda m, t=name: self.rates.tick(t),
+                                                         qos_profile_sensor_data, raw=True)
+        except Exception:
+          self.monitors[name] = None
+    self.graph = graph
+
+  def topic_list(self):
+    rates, chosen = self.rates.get(), set(record_state(self.recorder)['topics'])
+    out = [{'name': n, 'type': g['type'], 'pubs': g['pubs'], 'hz': rates.get(n, 0.0), 'on': n in chosen}
+           for n, g in self.graph.items()]
+    out += [{'name': n, 'type': None, 'pubs': 0, 'hz': 0.0, 'on': True} for n in chosen - set(self.graph)]
+    return sorted(out, key=lambda t: (not t['on'], t['name']))
+
   def on_status(self, msg):
-    self.rates.tick(self.topics['status'])
     try:
       self.status, self.status_at = json.loads(msg.data), time.monotonic()
     except ValueError:
@@ -118,22 +144,18 @@ class StationNode(Node):
       self.recorder.note_fault(self.status.get('reason') or self.status.get('fault'))
 
   def on_real(self, msg):
-    self.rates.tick(self.topics['real'])
     self.real = dict(zip(msg.name, msg.position))
 
   def on_target(self, msg):
-    self.rates.tick(self.topics['target'])
     self.target_at = time.monotonic()
 
   def on_frame(self, cam, msg):
-    self.rates.tick(camera_config.color_topic(cam))
     if 'jpeg' not in msg.format.lower():
       return
     seq = self.frames.get(cam['name'], (0,))[0] + 1
     self.frames[cam['name']] = (seq, time.monotonic(), bytes(msg.data))
 
-  def on_info(self, cam, topic, msg):
-    self.rates.tick(topic)
+  def on_info(self, cam, msg):
     self.sizes[cam['name']] = (msg.width, msg.height)
 
   def cameras(self):
@@ -170,7 +192,7 @@ class StationNode(Node):
     status = self.status if self.status and now - self.status_at < STALE_S else None
     return {'type': 'state', 'robot': status, 'real': self.real if status else None,
             'target_age': round(now - self.target_at, 2) if self.target_at else None,
-            'rates': self.rates.get(), 'topics': self.topics, 'recording': record_state(self.recorder),
+            'topics': self.topics, 'recording': record_state(self.recorder), 'graph': self.topic_list(),
             'cameras': self.cameras()}
 
 
@@ -178,7 +200,7 @@ def record_state(rec):
   c = rec.current
   err = rec.error or rec.alive()
   return {'recording': bool(c), 'id': c and c['id'], 'task': c and c['task'], 'elapsed': rec.elapsed(),
-          'faults': c and c['faults'], 'error': err, 'topics': rec.topics}
+          'faults': c and c['faults'], 'error': err, 'topics': c['topics'] if c else rec.topics}
 
 
 def record_op(rec, op, msg):
@@ -276,6 +298,8 @@ class WebServer:
       return
     if op in ('record_start', 'record_stop', 'record_discard'):
       await asyncio.to_thread(record_op, rec, op.split('_', 1)[1], msg)
+    elif op == 'topics_set':
+      rec.set_topics(msg['topics'])
     elif op == 'episode_update':
       rec.update(msg['id'], **{k: msg[k] for k in ('success', 'task', 'notes') if k in msg})
     elif op == 'episode_delete':
@@ -296,16 +320,16 @@ def main():
   p.add_argument('--port', type=int, default=8080)
   p.add_argument('--host', default='0.0.0.0')
   p.add_argument('--cameras', default=str(camera_config.DEFAULT), help='the cameras (cameras.py), recorded and previewed')
-  p.add_argument('--topics', nargs='*', default=[], help='more topics to record')
+  p.add_argument('--topics', nargs='*', default=[], help='more topics to record by default')
   a = p.parse_args(rclpy.utilities.remove_ros_args()[1:])
   rclpy.init()
   ns = '/' + (a.ns if a.ns is not None else a.robot).strip('/')
   cams = camera_config.load(a.cameras)
   topics = [f'{ns}/joint_states', f'{ns}/real/joint_states', f'{ns}/real/command', f'{ns}/real/status',
             *camera_config.record_topics(cams), *a.topics]
-  recorder = Recorder(a.data, topics, robot=a.robot, driver=a.driver,
-                      meta={'cameras': [{k: c[k] for k in ('name', 'type', 'width', 'height', 'fps', 'depth', 'serial')}
-                                        for c in cams]})
+  recorder = Recorder(a.data, topics, robot=a.robot, driver=a.driver, meta=lambda topics: {
+      'cameras': [{k: c[k] for k in ('name', 'type', 'width', 'height', 'fps', 'depth', 'serial')}
+                  for c in cams if camera_config.color_topic(c) in topics]})
   node = StationNode(a, recorder, cams)
   ex = MultiThreadedExecutor(num_threads=2)
   ex.add_node(node)

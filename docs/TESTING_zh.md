@@ -114,6 +114,10 @@ Quest 浏览器打开 `chrome://flags`，在 "Insecure origins treated as secure
 5. `./station.sh up`，网页 Cameras 一栏应该有每个相机的实时画面，Hz 接近设定的 fps（绿色；低于 80% 变黄）。
 6. 录一段，Episodes 里的消息数和大小应该明显变大；`meta.json` 里有 `cameras`。
 
+### 录哪些话题
+
+网页的 Topics 一栏列出 ROS 里所有话题（本机的、相机的、Lobby 通过 rosbridge 发来的，比如 `/tf` 和仿真相机），带类型、发布者数和频率。勾上的就会录，选择存在 `data/record_topics.json`，下次启动还在。默认勾的是机器人和相机的话题，之后新加的相机也会自动勾上。还没发布的话题可以在下面按名字加，等它出现就开始录。没有真机也能录（只开 Lobby 和相机）。
+
 排查：
 - 画面一直是 "no frames on ..."：看 `./station.sh up` 的输出里 `realsense2_camera_node` / `usb_cam_node_exe` 的报错。
 - RealSense 报 `No RealSense devices were found`：udev 规则没装，或者序列号写错（要加引号）。USB 3 口和线也要确认，USB 2 下高分辨率会失败。

@@ -61,6 +61,11 @@
   .cam .cap { display: flex; gap: 8px; align-items: baseline; padding: 6px 10px; font-size: 12px; }
   .cam .cap b { font-size: 13px; }
   .cam .cap .hz { margin-left: auto; font-variant-numeric: tabular-nums; }
+  #topics td:first-child, #topics th:first-child { width: 26px; }
+  #topics .type { color: var(--muted); font-size: 12px; }
+  #topics tr.off td:not(:first-child) { color: var(--muted); }
+  #topicbox { max-height: 420px; overflow: auto; }
+  .tsel { font-weight: 600; }
   code { font: 12px ui-monospace, monospace; background: var(--chip); padding: 1px 5px; border-radius: 4px; }
   @media (max-width: 560px) { main { padding: 12px; grid-template-columns: 1fr; } header { padding: 12px; } }
 </style>
@@ -96,7 +101,21 @@
       <span id="timer" class="muted">0:00</span>
     </div>
     <div id="recmsg" class="muted"></div>
-    <table id="rates" style="margin-top:8px"></table>
+    <div id="recsum" class="muted" style="margin-top:8px"></div>
+  </section>
+
+  <section class="wide">
+    <h2>Topics <span class="muted" id="tcount"></span></h2>
+    <div class="row">
+      <input type="text" id="tfilter" placeholder="Filter, e.g. panda, cameras, tf">
+      <label class="muted"><input type="checkbox" id="tonly"> chosen only</label>
+    </div>
+    <div id="topicbox"><table id="topics"></table></div>
+    <div class="row">
+      <input type="text" id="tadd" placeholder="A topic not published yet, e.g. /panda/wrist_cam/image_raw/compressed">
+      <button id="taddbtn">Add</button>
+    </div>
+    <div class="muted" style="font-size:12px">Ticked topics are recorded (kept for the next recordings); anything in the ROS graph: the robot's, the cameras', the lobby's through rosbridge. One not published yet is recorded once it is.</div>
   </section>
 
   <section class="wide">
@@ -158,7 +177,6 @@ function drawState() {
 
   const rec = state.recording;
   $('recpill').hidden = !rec.recording;
-  $('start').disabled = rec.recording;
   $('stop').disabled = $('discard').disabled = !rec.recording;
   $('task').disabled = rec.recording;
   $('timer').textContent = fmtTime(rec.elapsed ?? 0);
@@ -166,23 +184,56 @@ function drawState() {
   if (rec.error) flash(rec.error);
   else if (rec.recording) $('recmsg').innerHTML = `recording <b>${esc(rec.id)}</b>${rec.faults?.length ? ` · <span class="err">faults: ${esc(rec.faults.join('; '))}</span>` : ''}`;
   else if (!$('recmsg').querySelector('.err')) $('recmsg').textContent = '';
-  const rates = state.rates ?? {};
-  $('rates').innerHTML = '<tr><th>recorded topic</th><th class="num">Hz</th></tr>' + rec.topics.map((t) => {
-    const hz = rates[t];
-    return `<tr><td>${esc(t)}</td><td class="num ${hz ? '' : 'muted'}">${hz != null ? hz.toFixed(1) : '–'}</td></tr>`;
-  }).join('');
+  const graph = state.graph ?? [], chosen = graph.filter((t) => t.on);
+  const silent = chosen.filter((t) => !t.hz).map((t) => t.name);
+  $('recsum').innerHTML = !chosen.length ? '<span class="err">No topics chosen (Topics below).</span>' :
+    `${rec.recording ? 'Recording' : 'Will record'} <b>${chosen.length}</b> topic${chosen.length > 1 ? 's' : ''}` +
+    (silent.length ? ` · <span class="warn" title="${esc(silent.join('\n'))}">${silent.length} silent</span>` : '');
+  $('start').disabled = rec.recording || !chosen.length;
+  drawTopics();
+}
+
+let topicKey = '';
+function drawTopics() {
+  const graph = state.graph ?? [], rec = state.recording.recording;
+  const f = $('tfilter').value.trim().toLowerCase(), only = $('tonly').checked;
+  const shown = graph.filter((t) => (!only || t.on) && (!f || t.name.toLowerCase().includes(f) || (t.type ?? '').toLowerCase().includes(f)));
+  $('tcount').textContent = `(${graph.filter((t) => t.on).length} of ${graph.length} chosen)`;
+  const key = JSON.stringify([rec, shown.map((t) => [t.name, t.on, t.type])]);
+  if (key !== topicKey) {  // rebuilt when the list changes; rates updated in place
+    topicKey = key;
+    $('topics').innerHTML = '<tr><th></th><th>topic</th><th>type</th><th class="num">pubs</th><th class="num">Hz</th></tr>' +
+      shown.map((t) => `<tr class="${t.on ? '' : 'off'}">
+        <td><input type="checkbox" data-topic="${esc(t.name)}" ${t.on ? 'checked' : ''} ${rec ? 'disabled' : ''}></td>
+        <td class="${t.on ? 'tsel' : ''}">${esc(t.name)}</td><td class="type">${t.type ? esc(t.type) : 'not published'}</td>
+        <td class="num" data-pubs></td><td class="num" data-hz></td></tr>`).join('');
+  }
+  const rows = $('topics').rows;
+  shown.forEach((t, i) => {
+    const r = rows[i + 1];
+    r.querySelector('[data-pubs]').textContent = t.pubs;
+    const hz = r.querySelector('[data-hz]');
+    hz.textContent = t.hz ? t.hz.toFixed(1) : '–';
+    hz.className = 'num ' + (t.hz ? '' : t.on ? 'warn' : 'muted');
+  });
+}
+function chooseTopics(change) {
+  const set = new Set((state?.graph ?? []).filter((t) => t.on).map((t) => t.name));
+  change(set);
+  send('topics_set', { topics: [...set] });
 }
 
 let camKey = '';
 function drawCameras() {
   const cams = state.cameras ?? [];
-  $('camcount').textContent = cams.length ? `(${cams.length}, recorded with the robot)` : '';
+  $('camcount').textContent = cams.length ? `(${cams.length})` : '';
+  const chosen = new Set((state.graph ?? []).filter((t) => t.on).map((t) => t.name));
   const key = cams.map((c) => c.name).join(',');
   if (key !== camKey) {  // (re)build the cards only when the cameras change: the previews keep streaming
     camKey = key;
     $('cams').innerHTML = cams.length ? cams.map((c) => `<div class="cam" data-cam="${esc(c.name)}">
         <div class="view"><img alt="${esc(c.name)}"><div class="over">waiting for frames…</div></div>
-        <div class="cap"><b>${esc(c.name)}</b><span class="muted">${esc(c.type)}${c.depth ? ' + depth' : ''}</span><span class="info muted"></span><span class="hz"></span></div>
+        <div class="cap"><b>${esc(c.name)}</b><span class="muted">${esc(c.type)}${c.depth ? ' + depth' : ''}</span><span class="info muted"></span><span class="recd"></span><span class="hz"></span></div>
       </div>`).join('') : `<div class="later">No cameras. List them in <code>cameras.yaml</code> (see <code>cameras.example.yaml</code>;
         <code>python3 -m robot_station.cameras</code> shows the connected ones) and restart the station.</div>`;
     for (const el of $('cams').querySelectorAll('.cam')) startPreview(el);
@@ -195,6 +246,9 @@ function drawCameras() {
     if (!live) el.querySelector('.over').textContent = c.age == null ? `no frames on ${c.topic}` : `no frames for ${c.age.toFixed(0)} s`;
     const [w, h, fps] = c.want, size = c.size ? `${c.size[0]}×${c.size[1]}` : `${w}×${h}`;
     el.querySelector('.info').textContent = size;
+    const recd = el.querySelector('.recd'), on = chosen.has(c.topic);
+    recd.textContent = on ? '● recorded' : 'not recorded';
+    recd.className = 'recd ' + (on ? 'err' : 'muted');
     const hz = el.querySelector('.hz');
     hz.textContent = c.hz ? `${c.hz.toFixed(1)} Hz` : '–';
     hz.className = 'hz ' + (!c.hz ? 'err' : c.hz < 0.8 * fps ? 'warn' : 'ok');
@@ -222,6 +276,19 @@ function drawEpisodes() {
     }).join('');
 }
 
+$('topics').addEventListener('change', (e) => {
+  const t = e.target.dataset.topic;
+  if (t) chooseTopics((s) => e.target.checked ? s.add(t) : s.delete(t));
+});
+$('tfilter').oninput = $('tonly').onchange = () => state && drawTopics();
+$('taddbtn').onclick = () => {
+  let t = $('tadd').value.trim();
+  if (!t) return;
+  if (!t.startsWith('/')) t = '/' + t;
+  chooseTopics((s) => s.add(t));
+  $('tadd').value = '';
+};
+$('tadd').onkeydown = (e) => { if (e.key === 'Enter') $('taddbtn').click(); };
 $('enable').onclick = () => send('enable');
 $('disable').onclick = () => send('disable');
 $('start').onclick = () => { $('recmsg').textContent = ''; send('record_start', { task: $('task').value.trim() }); };

@@ -8,6 +8,10 @@
                cameras: [{name, type, width, height, fps, depth, serial}]}
 
 Recording: start(task) -> stop() keeps it, discard() stops and deletes it.
+What is recorded: the topics chosen (set_topics, kept in
+<data>/record_topics.json with the defaults it was made against; the
+defaults until there is one, and defaults new since (a camera added) are
+chosen too); a topic not published yet is recorded once it is.
 The episodes are listed from the directory, so whatever is there (copied
 in, recorded before) shows up; metadata.yaml (rosbag2's) gives the message
 counts per topic.
@@ -41,9 +45,17 @@ class Recorder:
   def __init__(self, data_dir, topics, robot='', driver='', meta=None):
     self.root = Path(data_dir) / 'episodes'
     self.root.mkdir(parents=True, exist_ok=True)
-    self.topics = list(topics)
+    self.choice = Path(data_dir) / 'record_topics.json'
+    self.defaults = sorted(set(topics))
+    self.topics = list(self.defaults)
+    try:
+      saved = json.loads(self.choice.read_text())
+      new = set(self.defaults) - set(saved.get('defaults', []))
+      self.topics = sorted(set(saved['topics']) | new)
+    except (OSError, ValueError, KeyError, TypeError):
+      pass
     self.robot, self.driver = robot, driver
-    self.meta = dict(meta or {})  # more for every episode's meta.json
+    self.meta = meta or (lambda topics: {})  # topics -> more for the episode's meta.json
     self.lock = threading.Lock()
     self.proc = None
     self.current = None   # meta of the episode being recorded
@@ -55,11 +67,21 @@ class Recorder:
   def recording(self):
     return self.current is not None
 
+  def set_topics(self, topics):
+    topics = sorted({str(t).strip() for t in topics if str(t).strip()})
+    for t in topics:
+      if not t.startswith('/') or ' ' in t:
+        raise ValueError(f'not a topic: {t!r}')
+    self.topics = topics
+    self.choice.write_text(json.dumps({'topics': topics, 'defaults': self.defaults}, indent=1))
+
   def start(self, task='', topics=None):
     with self.lock:
       if self.current:
         raise RuntimeError('already recording')
       topics = list(topics or self.topics)
+      if not topics:
+        raise RuntimeError('no topics chosen to record')
       eid = time.strftime('%Y%m%d-%H%M%S')
       d = self.root / eid
       n = 1
@@ -73,7 +95,7 @@ class Recorder:
                                    start_new_session=True)
       self.current = {'id': d.name, 'task': task, 'robot': self.robot, 'driver': self.driver, 'topics': topics,
                       'started': time.time(), 'ended': None, 'duration': None, 'success': None, 'notes': '',
-                      'faults': [], 'station': git_commit(), **self.meta}
+                      'faults': [], 'station': git_commit(), **self.meta(topics)}
       self.write_meta(self.current)
       self.error = ''
       return dict(self.current)
