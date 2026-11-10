@@ -1,7 +1,8 @@
 """The station: rosbridge_server (the lobby connects to it: its ROS panel's
 Bridge, <this computer>:<rosbridge_port>), the follower (robot_station/follower.py:
 the real robot follows the lobby's) and the web page (robot_station/web.py:
-http://<this computer>:<web_port>/, recording to <data>).
+http://<this computer>:<web_port>/, recording to <data>) and the cameras
+(<cameras>, default cameras.yaml: robot_station/cameras.py).
 
     ros2 launch launch/station.launch.py driver:=fake
     ros2 launch launch/station.launch.py driver:=real ip:=172.16.0.2 speed:=0.3
@@ -11,11 +12,13 @@ import pathlib
 import sys
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
 from launch.substitutions import LaunchConfiguration as C
 from launch_ros.actions import Node
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+from robot_station import cameras  # noqa: E402
 
 
 def generate_launch_description():
@@ -31,6 +34,7 @@ def generate_launch_description():
       ('rosbridge_port', '9090', 'the lobby\'s Bridge'),
       ('web_port', '8080', 'the station\'s page'),
       ('data', str(REPO / 'data'), 'where episodes go'),
+      ('cameras', str(cameras.DEFAULT), 'the cameras (none if the file is not there)'),
   ]
   py = lambda module, *a: ExecuteProcess(cmd=[sys.executable, '-m', module, *a], cwd=str(REPO), output='screen',
                                          additional_env={'PYTHONUNBUFFERED': '1'})
@@ -41,5 +45,7 @@ def generate_launch_description():
       py('robot_station.follower', '--robot', C('robot'), '--driver', C('driver'), '--ip', C('ip'), '--speed', C('speed'),
          '--dynamics', C('dynamics'), '--grasp-force', C('grasp_force'),
          '--controller', C('controller'), '--stiffness', C('stiffness')),
-      py('robot_station.web', '--robot', C('robot'), '--driver', C('driver'), '--port', C('web_port'), '--data', C('data')),
+      py('robot_station.web', '--robot', C('robot'), '--driver', C('driver'), '--port', C('web_port'), '--data', C('data'),
+         '--cameras', C('cameras')),
+      OpaqueFunction(function=lambda context: cameras.nodes(cameras.load(C('cameras').perform(context)))),
   ])

@@ -51,6 +51,17 @@
   td input[type=text] { width: 100%; padding: 3px 6px; }
   #timer { font-size: 22px; font-variant-numeric: tabular-nums; font-weight: 600; }
   .later { color: var(--muted); font-size: 13px; }
+  #cams { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .cam { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
+  .cam .view { position: relative; aspect-ratio: 4 / 3; background: #000; }
+  .cam img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .cam .over { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff;
+               background: rgba(0, 0, 0, .55); font-size: 13px; text-align: center; padding: 10px; }
+  .cam .over[hidden] { display: none; }
+  .cam .cap { display: flex; gap: 8px; align-items: baseline; padding: 6px 10px; font-size: 12px; }
+  .cam .cap b { font-size: 13px; }
+  .cam .cap .hz { margin-left: auto; font-variant-numeric: tabular-nums; }
+  code { font: 12px ui-monospace, monospace; background: var(--chip); padding: 1px 5px; border-radius: 4px; }
   @media (max-width: 560px) { main { padding: 12px; grid-template-columns: 1fr; } header { padding: 12px; } }
 </style>
 </head>
@@ -89,14 +100,15 @@
   </section>
 
   <section class="wide">
+    <h2>Cameras <span class="muted" id="camcount"></span></h2>
+    <div id="cams"></div>
+  </section>
+
+  <section class="wide">
     <h2>Episodes <span class="muted" id="epcount"></span></h2>
     <table id="episodes"></table>
   </section>
 
-  <section>
-    <h2>Cameras</h2>
-    <div class="later">Coming next: add RealSense / USB cameras, preview them, record them with the robot.</div>
-  </section>
   <section>
     <h2>Convert</h2>
     <div class="later">Coming next: episodes to a LeRobot dataset (resampled at a fixed fps, the cameras as video).</div>
@@ -108,11 +120,11 @@ let ws, state = null, episodes = [];
 
 function connect() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
-  ws.onopen = () => { $('conn').textContent = 'connected'; };
+  ws.onopen = () => { $('conn').textContent = 'connected'; camKey = ''; };  // (previews restart)
   ws.onclose = () => { $('conn').textContent = 'disconnected, retrying…'; setTimeout(connect, 1000); };
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
-    if (m.type === 'state') { state = m; drawState(); }
+    if (m.type === 'state') { state = m; drawState(); drawCameras(); }
     else if (m.type === 'episodes') { episodes = m.episodes; drawEpisodes(); }
     else if (m.type === 'error') { flash(m.msg); }
   };
@@ -159,6 +171,39 @@ function drawState() {
     const hz = rates[t];
     return `<tr><td>${esc(t)}</td><td class="num ${hz ? '' : 'muted'}">${hz != null ? hz.toFixed(1) : '–'}</td></tr>`;
   }).join('');
+}
+
+let camKey = '';
+function drawCameras() {
+  const cams = state.cameras ?? [];
+  $('camcount').textContent = cams.length ? `(${cams.length}, recorded with the robot)` : '';
+  const key = cams.map((c) => c.name).join(',');
+  if (key !== camKey) {  // (re)build the cards only when the cameras change: the previews keep streaming
+    camKey = key;
+    $('cams').innerHTML = cams.length ? cams.map((c) => `<div class="cam" data-cam="${esc(c.name)}">
+        <div class="view"><img alt="${esc(c.name)}"><div class="over">waiting for frames…</div></div>
+        <div class="cap"><b>${esc(c.name)}</b><span class="muted">${esc(c.type)}${c.depth ? ' + depth' : ''}</span><span class="info muted"></span><span class="hz"></span></div>
+      </div>`).join('') : `<div class="later">No cameras. List them in <code>cameras.yaml</code> (see <code>cameras.example.yaml</code>;
+        <code>python3 -m robot_station.cameras</code> shows the connected ones) and restart the station.</div>`;
+    for (const el of $('cams').querySelectorAll('.cam')) startPreview(el);
+  }
+  for (const c of cams) {
+    const el = $('cams').querySelector(`[data-cam="${CSS.escape(c.name)}"]`);
+    if (!el) continue;
+    const live = c.age != null && c.age < 2;
+    el.querySelector('.over').hidden = live;
+    if (!live) el.querySelector('.over').textContent = c.age == null ? `no frames on ${c.topic}` : `no frames for ${c.age.toFixed(0)} s`;
+    const [w, h, fps] = c.want, size = c.size ? `${c.size[0]}×${c.size[1]}` : `${w}×${h}`;
+    el.querySelector('.info').textContent = size;
+    const hz = el.querySelector('.hz');
+    hz.textContent = c.hz ? `${c.hz.toFixed(1)} Hz` : '–';
+    hz.className = 'hz ' + (!c.hz ? 'err' : c.hz < 0.8 * fps ? 'warn' : 'ok');
+  }
+}
+function startPreview(el) {  // MJPEG; reconnects when the stream ends (the station restarted)
+  const img = el.querySelector('img');
+  img.onerror = () => setTimeout(() => startPreview(el), 2000);
+  img.src = `/camera/${encodeURIComponent(el.dataset.cam)}.mjpg?t=${Date.now()}`;
 }
 
 function drawEpisodes() {

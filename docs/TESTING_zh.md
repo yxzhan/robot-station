@@ -95,6 +95,31 @@ Quest 浏览器打开 `chrome://flags`，在 "Insecure origins treated as secure
 
 录的数据在 `./data/episodes/<日期-时间>/`：`bag/`（rosbag2，mcap）和 `meta.json`。
 
+### 相机
+
+1. **宿主机装 RealSense 的 udev 规则**（只做一次）。容器里的 librealsense 走 libusb，容器以普通用户运行，没有这条规则打不开 USB 设备：
+   ```bash
+   sudo curl -o /etc/udev/rules.d/99-realsense-libusb.rules \
+     https://raw.githubusercontent.com/IntelRealSense/librealsense/master/config/99-realsense-libusb.rules
+   sudo udevadm control --reload-rules && sudo udevadm trigger
+   ```
+   USB 相机（`/dev/video*`）不用装规则：`station.sh` 会把宿主机的 video 组加给容器。
+2. **改了 Dockerfile，要重新 build**：`./station.sh build`。
+3. **查看接了哪些相机**：
+   ```bash
+   ./station.sh run --rm station python3 -m robot_station.cameras
+   ```
+   RealSense 列出序列号，USB 相机列出 `/dev/v4l/by-id/...` 路径（拔插后不变，`/dev/videoN` 会变）。
+4. **写 `cameras.yaml`**：复制 `cameras.example.yaml`，填名字、类型、序列号或设备路径、分辨率和帧率。先用 `type: fake` 试一遍也可以。
+5. `./station.sh up`，网页 Cameras 一栏应该有每个相机的实时画面，Hz 接近设定的 fps（绿色；低于 80% 变黄）。
+6. 录一段，Episodes 里的消息数和大小应该明显变大；`meta.json` 里有 `cameras`。
+
+排查：
+- 画面一直是 "no frames on ..."：看 `./station.sh up` 的输出里 `realsense2_camera_node` / `usb_cam_node_exe` 的报错。
+- RealSense 报 `No RealSense devices were found`：udev 规则没装，或者序列号写错（要加引号）。USB 3 口和线也要确认，USB 2 下高分辨率会失败。
+- USB 相机报 `Cannot open device`：路径不对，或者权限（`ls -l /dev/video*` 看组是不是 video）。
+- 多个相机加起来带宽不够时，降分辨率或帧率；USB 相机用 `mjpeg2rgb`。
+
 ---
 
 ## B. giskard demo

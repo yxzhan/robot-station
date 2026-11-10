@@ -11,6 +11,7 @@ robot-lobby (Quest / PC browser) ── rosbridge ──►  this computer (ROS 
   /panda/real/joint_states, status  ◄─────────────     │
   /panda/real/enable  ───────────────────────────►     └─► /panda/real/command (the action)
                                                      web page :8080 ── recorder (rosbag2, mcap) ──► data/episodes/
+                                       cameras (cameras.yaml) ── /cameras/<name>/color/image_raw/compressed ──┘
 ```
 
 The step-by-step procedure on the real Panda (both the lobby teleop with recording and the
@@ -41,8 +42,26 @@ after a change (only after a Dockerfile change).
 | `ROS_DOMAIN_ID` | `0` | |
 
 Without Docker (ROS 2 Jazzy, `python3-aiohttp`, `ros-jazzy-rosbridge-suite`,
-`ros-jazzy-rosbag2-storage-mcap`, franky for the real Panda):
+`ros-jazzy-rosbag2-storage-mcap`, franky for the real Panda; for cameras
+`ros-jazzy-realsense2-camera`, `ros-jazzy-usb-cam`, `ros-jazzy-image-transport-plugins`, `python3-opencv`):
 `ros2 launch launch/station.launch.py driver:=fake`.
+
+## Cameras
+
+Listed in `cameras.yaml` (copy `cameras.example.yaml`); each one a node publishing
+`/cameras/<name>/color/image_raw/compressed` (JPEG) and `.../camera_info`, recorded with the robot
+and previewed on the page. Restart the station after changing it.
+
+| `type` | driver | which one |
+|---|---|---|
+| `realsense` | `realsense2_camera` (librealsense, RSUSB backend) | `serial` (none: the first found); `depth: true` adds aligned depth (`.../aligned_depth_to_color/image_raw/compressedDepth`, 16-bit PNG) |
+| `usb` | `usb_cam` (V4L2) | `device: /dev/v4l/by-id/...` (stable across replugs), `pixel_format` (`mjpeg2rgb`, `yuyv2rgb`) |
+| `fake` | `robot_station/fake_camera.py` | a moving test pattern, no hardware |
+
+Common: `width`, `height`, `fps` (640×480@30); `params:` passes anything else to the driver's node.
+What is connected: `./station.sh run --rm station python3 -m robot_station.cameras`.
+The container sees the host's `/dev` (cameras re-enumerate); RealSense needs librealsense's udev
+rule on the host (docs/TESTING_zh.md). Each episode's `meta.json` lists its cameras.
 
 ## Teleoperate
 
@@ -75,13 +94,16 @@ The page (`http://<this computer>:8080/`):
 - **Recording**: a task, Start, Stop & keep, Discard (Space starts / stops); the recorded topics'
   rates while it runs, faults seen.
 - **Episodes**: duration, messages, size; mark success ✓ / failure ✗, rename the task, delete.
-- **Cameras**, **Convert**: next (RealSense / USB cameras; episodes to a LeRobot dataset).
+- **Cameras**: a live preview of each (MJPEG, `/camera/<name>.mjpg`, at most 10 fps), its rate
+  against the configured fps.
+- **Convert**: next (episodes to a LeRobot dataset).
 
 Each episode is `data/episodes/<date-time>/` with `bag/` (rosbag2, mcap) and `meta.json` (task,
 robot, driver, topics, times, success, faults, the station's git commit). Recorded:
 `/panda/joint_states` (the lobby's target), `/panda/real/joint_states` (measured, with velocities
 and torques), `/panda/real/command` (what the robot was commanded after the safety layer: the
-action; the gripper open or closed) and `/panda/real/status`.
+action; the gripper open or closed), `/panda/real/status` and the cameras' compressed images and
+camera_info.
 
 Recording over ROS too (the lobby's VR menu, scripts): `/station/record/cmd` (std_msgs/String,
 JSON `{"op": "start", "task": "..."}`, `{"op": "stop"}`, `{"op": "discard"}`),
@@ -111,7 +133,7 @@ python3 tests/smoke.py                                    # (or ./station.sh exe
 ```
 
 stands in for the lobby: publishes the target, enables, moves the robot, records an episode over
-ROS and checks the bag.
+ROS and checks the bag (with cameras, also their images: try a `cameras.yaml` of `fake` ones).
 
 ## Layout
 
@@ -121,9 +143,11 @@ robot_station/hw.py         the same as ros2_control hardware (giskard)
 robot_station/safety.py     limits, speed, start tolerance, timeouts, falling behind
 robot_station/drivers/      per robot: spec and driver (panda: franky; fake; so101: to do)
 robot_station/recorder.py   episodes: ros2 bag record, meta.json
+robot_station/cameras.py    cameras.yaml: the camera nodes, their topics; what is connected
+robot_station/fake_camera.py  a test pattern camera
 robot_station/web.py        the page's server (aiohttp) and its ROS node
 robot_station/static/       the page
-launch/               rosbridge + follower + page
+launch/               rosbridge + follower + page + cameras
 docker/, docker-compose.yml, station.sh
 ```
 

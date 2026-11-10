@@ -1,5 +1,7 @@
 # The station's image: ROS 2 Jazzy (Ubuntu 24.04), rosbridge, rosbag2 (mcap),
-# franky on libfranka 0.9.2 (the Panda, Panda System 4.2.x). The repository
+# franky on libfranka 0.9.2 (the Panda, Panda System 4.2.x), the cameras'
+# drivers (realsense2_camera: librealsense with its RSUSB backend, no kernel
+# patches; usb_cam), JPEG / PNG image transports. The repository
 # itself is not in the image: docker-compose.yml mounts it at /repo, and the
 # episodes go to its data/.
 #
@@ -14,6 +16,10 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
       ros-jazzy-rosbag2 \
       ros-jazzy-rosbag2-storage-mcap \
       ros-jazzy-control-msgs \
+      ros-jazzy-realsense2-camera \
+      ros-jazzy-usb-cam \
+      ros-jazzy-image-transport-plugins \
+      python3-opencv v4l-utils \
       python3-pip python3-aiohttp python3-yaml git \
     && rm -rf /var/lib/apt/lists/*
 

@@ -1,7 +1,8 @@
 """A smoke test of a running station (fake robot), without the lobby: this
 script stands in for it, publishing the target, enabling the robot, moving it
 and recording an episode over ROS (/station/record/cmd), then checks that the
-robot followed and that the episode's bag holds the motion.
+robot followed and that the episode's bag holds the motion (and the
+cameras' images, if there are cameras).
 
     ros2 launch launch/station.launch.py driver:=fake &
     python3 tests/smoke.py [--data data] [--ns /panda]
@@ -86,7 +87,10 @@ def main():
     if topic == f'{a.ns}/real/command':
       m = deserialize_message(data, JointState)
       j4.append(m.position[m.name.index('joint4')])
-  check(len(counts) == 4 and min(counts.values()) > 3, f'bag: {counts}')
+  check(set(counts) == set(meta['topics']) and min(counts.values()) > 3, f'bag: {counts}')
+  for c in meta.get('cameras', []):  # (cameras.yaml's: their images at about their rate)
+    n = counts[f'/cameras/{c["name"]}/color/image_raw/compressed']
+    check(n > 0.7 * c['fps'] * meta['duration'], f'camera {c["name"]}: {n} images in {meta["duration"]} s ({c["fps"]} fps)')
   check(j4 and min(j4) < q0[3] - 0.15, f'the commands hold the motion: joint4 {q0[3]:.3f} down to {min(j4):.3f}')
   print('all ok')
 

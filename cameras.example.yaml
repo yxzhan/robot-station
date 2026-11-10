@@ -1,0 +1,27 @@
+# The station's cameras: copy to cameras.yaml and edit (robot_station/cameras.py).
+# Which are connected, with their serials / devices:
+#   ./station.sh run --rm station python3 -m robot_station.cameras
+# Each publishes /cameras/<name>/color/image_raw/compressed (recorded with the
+# robot, previewed on the page); restart the station after a change.
+cameras:
+  - name: front              # lower case, digits, _ (the topic's and, later, the dataset's name)
+    type: realsense          # realsense | usb | fake
+    serial: "123456789012"   # in quotes; leave out for the first RealSense found
+    width: 640
+    height: 480
+    fps: 30
+    depth: false             # true: also aligned depth (16 bit PNG), recorded
+
+  - name: wrist
+    type: usb
+    device: /dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920-video-index0
+    width: 640
+    height: 480
+    fps: 30
+    pixel_format: mjpeg2rgb  # (usb_cam's; yuyv2rgb for cameras without MJPEG)
+
+  # - name: test
+  #   type: fake             # a moving test pattern, no hardware
+  #
+  # Any other parameter of the driver's node (realsense2_camera, usb_cam):
+  #   params: {initial_reset: true}

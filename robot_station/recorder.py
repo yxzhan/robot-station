@@ -4,7 +4,8 @@
               process of its own while recording)
   meta.json   {id, task, robot, driver, topics, started, ended (unix s),
                duration, success (true | false | null: not marked), notes,
-               faults: [reasons seen while recording], station (git commit)}
+               faults: [reasons seen while recording], station (git commit),
+               cameras: [{name, type, width, height, fps, depth, serial}]}
 
 Recording: start(task) -> stop() keeps it, discard() stops and deletes it.
 The episodes are listed from the directory, so whatever is there (copied
@@ -37,11 +38,12 @@ def git_commit():
 
 
 class Recorder:
-  def __init__(self, data_dir, topics, robot='', driver=''):
+  def __init__(self, data_dir, topics, robot='', driver='', meta=None):
     self.root = Path(data_dir) / 'episodes'
     self.root.mkdir(parents=True, exist_ok=True)
     self.topics = list(topics)
     self.robot, self.driver = robot, driver
+    self.meta = dict(meta or {})  # more for every episode's meta.json
     self.lock = threading.Lock()
     self.proc = None
     self.current = None   # meta of the episode being recorded
@@ -71,7 +73,7 @@ class Recorder:
                                    start_new_session=True)
       self.current = {'id': d.name, 'task': task, 'robot': self.robot, 'driver': self.driver, 'topics': topics,
                       'started': time.time(), 'ended': None, 'duration': None, 'success': None, 'notes': '',
-                      'faults': [], 'station': git_commit()}
+                      'faults': [], 'station': git_commit(), **self.meta}
       self.write_meta(self.current)
       self.error = ''
       return dict(self.current)

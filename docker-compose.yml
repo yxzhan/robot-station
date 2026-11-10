@@ -12,13 +12,19 @@ services:
     network_mode: host
     ipc: host
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    group_add: ["${VIDEO_GID:-44}"]   # /dev/video* (the host's video group)
     # Real time for libfranka (the host's PREEMPT_RT kernel):
     cap_add: [SYS_NICE]
     ulimits:
       rtprio: 99
       memlock: -1
+    # Cameras (cameras.yaml): RealSense and USB cameras re-enumerate, so all of
+    # /dev, with the USB (189) and video4linux (81) devices allowed. RealSense
+    # through libusb needs the host's udev rule for it (docs/TESTING_zh.md).
+    device_cgroup_rules: ['c 189:* rmw', 'c 81:* rmw']
     volumes:
       - .:/repo
+      - /dev:/dev
     environment:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
     command: >
@@ -27,8 +33,3 @@ services:
       speed:=${SPEED:-0.5} dynamics:=${DYNAMICS:-0.15} grasp_force:=${GRASP_FORCE:-20}
       controller:=${CONTROLLER:-impedance} stiffness:=${STIFFNESS:-1.0}
       rosbridge_port:=${ROSBRIDGE_PORT:-9090} web_port:=${WEB_PORT:-8080} data:=/repo/data
-    # Cameras (next): RealSense and USB cameras re-enumerate, so all of /dev with
-    # the USB (189) and video4linux (81) devices allowed:
-    # devices: []
-    # volumes: [/dev:/dev]
-    # device_cgroup_rules: ['c 189:* rmw', 'c 81:* rmw']
