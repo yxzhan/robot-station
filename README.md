@@ -30,6 +30,14 @@ DRIVER=real ROBOT_IP=172.16.0.2 SPEED=0.3 ./station.sh up  # the Panda (FCI acti
 The repository is mounted into the container at `/repo`: the code runs as it is here, no rebuild
 after a change (only after a Dockerfile change).
 
+The image is ROS 2 Jazzy desktop-full, so rviz2, rqt and `rqt_image_view` are there; they show on
+this computer's display (`station.sh` runs `xhost +local:`):
+
+```bash
+./station.sh run --rm station rviz2                         # alongside a running station (same ROS_DOMAIN_ID)
+./station.sh exec station ros2 run rqt_image_view rqt_image_view
+```
+
 | variable | default | |
 |---|---|---|
 | `DRIVER` | `fake` | `real` or `fake` |

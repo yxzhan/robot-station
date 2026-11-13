@@ -12,7 +12,7 @@ services:
     network_mode: host
     ipc: host
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    group_add: ["${VIDEO_GID:-44}"]   # /dev/video* (the host's video group)
+    group_add: ["${VIDEO_GID:-44}", "${RENDER_GID:-993}"]   # /dev/video*, /dev/dri/renderD* (the host's groups)
     # Real time for libfranka (the host's PREEMPT_RT kernel):
     cap_add: [SYS_NICE]
     ulimits:
@@ -21,12 +21,16 @@ services:
     # Cameras (cameras.yaml): RealSense and USB cameras re-enumerate, so all of
     # /dev, with the USB (189) and video4linux (81) devices allowed. RealSense
     # through libusb needs the host's udev rule for it (docs/TESTING_zh.md).
-    device_cgroup_rules: ['c 189:* rmw', 'c 81:* rmw']
+    # GPU (226: /dev/dri) for rviz2's OpenGL.
+    device_cgroup_rules: ['c 189:* rmw', 'c 81:* rmw', 'c 226:* rmw']
     volumes:
       - .:/repo
       - /dev:/dev
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw   # GUIs on the host's display (xhost +local: on the host)
     environment:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
     command: >
       ros2 launch launch/station.launch.py
       robot:=${ROBOT:-panda} driver:=${DRIVER:-fake} ip:=${ROBOT_IP:-172.16.0.2}

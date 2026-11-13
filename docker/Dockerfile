@@ -1,4 +1,5 @@
-# The station's image: ROS 2 Jazzy (Ubuntu 24.04), rosbridge, rosbag2 (mcap),
+# The station's image: ROS 2 Jazzy desktop-full (Ubuntu 24.04: rviz2, rqt,
+# rqt_image_view, camera_calibration, tf2 tools, ...), rosbridge, rosbag2 (mcap),
 # franky on libfranka 0.9.2 (the Panda, Panda System 4.2.x), the cameras'
 # drivers (realsense2_camera: librealsense with its RSUSB backend, no kernel
 # patches; usb_cam), JPEG / PNG image transports. The repository
@@ -7,7 +8,10 @@
 #
 # Real time: the host runs a PREEMPT_RT kernel; the container gets the
 # rights to use it (docker-compose.yml: SYS_NICE, rtprio, memlock).
-FROM ros:jazzy-ros-base
+#
+# GUIs (rviz2, rqt) on the host's X display: docker-compose.yml passes DISPLAY,
+# /tmp/.X11-unix and /dev/dri; run `xhost +local:` on the host once per login.
+FROM osrf/ros:jazzy-desktop-full
 
 ARG FRANKY_WHEEL="https://github.com/TimSchneider42/franky/releases/download/v2.0.0/franky_control-2.0.0+libfranka.0.9.2-cp312-cp312-manylinux_2_34_x86_64.whl"
 
@@ -21,6 +25,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
       ros-jazzy-image-transport-plugins \
       python3-opencv v4l-utils \
       python3-pip python3-aiohttp python3-yaml git \
+      mesa-utils \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --break-system-packages --no-cache-dir "${FRANKY_WHEEL}"
