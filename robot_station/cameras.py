@@ -23,6 +23,7 @@ them (record_topics(), color_topic()).
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -83,6 +84,9 @@ def record_topics(cams):
   return out
 
 
+RAW, JPEG, PNG = 'image_transport/raw', 'image_transport/compressed', 'image_transport/compressedDepth'
+
+
 def nodes(cams, python=sys.executable):
   """The launch actions starting the cameras."""
   from launch.actions import ExecuteProcess
@@ -98,12 +102,19 @@ def nodes(cams, python=sys.executable):
           'enable_color': True, 'enable_depth': c['depth'], 'align_depth.enable': c['depth'],
           'depth_module.depth_profile': profile, 'enable_infra1': False, 'enable_infra2': False,
           'pointcloud.enable': False, 'publish_tf': True,
+          # image_transport: JPEG for colour, PNG (compressedDepth) for depth only (each plugin on every image
+          # topic else: compressedDepth on colour logs an error a frame, theora / zstd cost CPU for nothing)
+          f'{name}.color.image_raw.enable_pub_plugins': [RAW, JPEG],
+          f'{name}.depth.image_rect_raw.enable_pub_plugins': [RAW],
+          f'{name}.aligned_depth_to_color.image_raw.enable_pub_plugins': [RAW, PNG],
           **c['params']}
       out.append(Node(package='realsense2_camera', executable='realsense2_camera_node', namespace=NS.strip('/'),
                       name=name, output='screen', parameters=[params]))
     elif c['type'] == 'usb':
-      params = {'video_device': str(c['device']), 'image_width': w, 'image_height': h, 'framerate': float(fps),
+      # (resolved: usb_cam reads a /dev/v4l/by-id link's relative target as /dev/../../videoN)
+      params = {'video_device': os.path.realpath(str(c['device'])), 'image_width': w, 'image_height': h, 'framerate': float(fps),
                 'pixel_format': c['pixel_format'], 'frame_id': f'{name}_color_optical_frame', 'camera_name': name,
+                'image_raw.enable_pub_plugins': [RAW, JPEG],
                 **c['params']}
       out.append(Node(package='usb_cam', executable='usb_cam_node_exe', namespace=f'{NS}/{name}/color', name=name,
                       output='screen', parameters=[params]))
@@ -128,7 +139,7 @@ def connected():
     try:
       txt = subprocess.run(['rs-enumerate-devices', '-s'], capture_output=True, text=True, timeout=20).stdout
       for line in txt.splitlines():
-        m = re.match(r'\s*(Intel RealSense \S+)\s+(\d{6,})', line)
+        m = re.match(r'\s*((?:Intel )?RealSense \S+)\s+(\d{6,})', line)
         if m:
           out.append(('realsense', m.group(2), m.group(1)))
     except Exception as e:
