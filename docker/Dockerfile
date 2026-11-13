@@ -53,11 +53,15 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
       mesa-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Patched (docker/franka_hardware.patch): its communication thread catches the
-# exception a reflex throws (it ended ros2_control_node) and restarts control
-# once the robot is idle again (error recovery); torques are sent every cycle
-# (it skipped a packet on a jittery period); it sleeps instead of spinning at
-# SCHED_FIFO 99 while disabled.
+# Patched (docker/franka_hardware.patch), its communication thread (the 1 kHz
+# loop with the robot):
+#  - it never waits for the control loop's thread: commands and state are
+#    exchanged with try_lock (a busy lock: the last cycle's), a command mode
+#    switch is done without holding the state's lock;
+#  - it catches the exception a reflex throws (it ended ros2_control_node) and
+#    restarts control once the robot is idle again (error recovery);
+#  - torques are sent every cycle (it skipped a packet on a jittery period);
+#  - it sleeps instead of spinning at SCHED_FIFO 99 while disabled.
 COPY docker/franka_hardware.patch /tmp/franka_hardware.patch
 SHELL ["/bin/bash", "-c"]
 RUN mkdir -p /opt/franka_ws/src && cd /opt/franka_ws/src \

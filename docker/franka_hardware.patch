@@ -1,6 +1,6 @@
 diff -ru a/include/franka_hardware/robot_communication_thread.hpp b/include/franka_hardware/robot_communication_thread.hpp
 --- a/franka_hardware/include/franka_hardware/robot_communication_thread.hpp	2026-11-13 14:32:22.000000000 +0100
-+++ b/franka_hardware/include/franka_hardware/robot_communication_thread.hpp	2026-11-13 15:11:56.184805633 +0100
++++ b/franka_hardware/include/franka_hardware/robot_communication_thread.hpp	2026-11-13 16:41:13.906109513 +0100
 @@ -1,6 +1,7 @@
  #pragma once
  
@@ -9,8 +9,11 @@ diff -ru a/include/franka_hardware/robot_communication_thread.hpp b/include/fran
  #include <atomic>
  #include <iostream>
  #include <memory>
-@@ -75,6 +76,8 @@
+@@ -73,8 +74,11 @@
+  private:
+   void run();
    void read();
++  void snapshot_commands();
    void write();
    void perform_command_mode_switch();
 +  void on_fault(const std::exception& e);
@@ -18,7 +21,19 @@ diff -ru a/include/franka_hardware/robot_communication_thread.hpp b/include/fran
  
    void filter_commands(std::chrono::steady_clock::time_point now);
  
-@@ -101,6 +104,11 @@
+@@ -98,9 +102,23 @@
+                                                                   0, 0, 1, 0, 0, 0, 0, 1};
+   std::array<double, DIM_ELBOW_COMMANDS> async_hw_elbow_command_{0, 0};
+ 
++  // (robot-station patch) This thread's copy of the commands (snapshot_commands)
++  std::array<double, N_JOINTS> cmd_effort_{0, 0, 0, 0, 0, 0, 0};
++  std::array<double, N_JOINTS> cmd_position_{0, 0, 0, 0, 0, 0, 0};
++  std::array<double, N_JOINTS> cmd_velocity_{0, 0, 0, 0, 0, 0, 0};
++  std::array<double, DIM_CARTESIAN_POSE> cmd_cartesian_pose_{1, 0, 0, 0, 0, 1, 0, 0,
++                                                             0, 0, 1, 0, 0, 0, 0, 1};
++  std::array<double, DIM_CARTESIAN_VELOCITIES> cmd_cartesian_velocities_{0, 0, 0, 0, 0, 0};
++  std::array<double, DIM_ELBOW_COMMANDS> cmd_elbow_{0, 0};
++
    // Module enabled
    std::atomic<bool> is_enabled_{false};
  
@@ -30,9 +45,20 @@ diff -ru a/include/franka_hardware/robot_communication_thread.hpp b/include/fran
    // Full robot state
    franka::RobotState current_robot_state_;
    franka::RobotState temp_franka_robot_state_;
+@@ -110,8 +128,8 @@
+   RobotCommandMode next_robot_command_mode_ = RobotCommandMode::IDLE;
+ 
+   // Flags for disabling commands until the first read pass
+-  bool is_internal_read_required_ = false;
+-  bool is_external_read_required_ = false;
++  std::atomic<bool> is_internal_read_required_{false};
++  std::atomic<bool> is_external_read_required_{false};
+ 
+   // Mutexes for thread safety
+   std::mutex robot_state_mutex_;
 diff -ru a/src/robot_communication_thread.cpp b/src/robot_communication_thread.cpp
 --- a/franka_hardware/src/robot_communication_thread.cpp	2026-11-13 14:32:22.000000000 +0100
-+++ b/franka_hardware/src/robot_communication_thread.cpp	2026-11-13 15:11:56.184805633 +0100
++++ b/franka_hardware/src/robot_communication_thread.cpp	2026-11-13 16:41:13.906109513 +0100
 @@ -1,5 +1,8 @@
  #include <cassert>
 +#include <chrono>
@@ -42,7 +68,242 @@ diff -ru a/src/robot_communication_thread.cpp b/src/robot_communication_thread.c
  
  #include <franka/control_tools.h>
  #include <franka/rate_limiting.h>
-@@ -216,7 +219,21 @@
+@@ -34,66 +37,102 @@
+ }
+ 
+ void RobotCommunicationThread::perform_command_mode_switch() {
+-  std::lock_guard<std::mutex> lock(robot_state_mutex_);
+-  if (current_robot_command_mode_ == next_robot_command_mode_) {
++  // (robot-station patch) The requested mode read without waiting for the control loop's thread,
++  // the switch (stopping and starting control: milliseconds) done without holding the state's
++  // lock (the control loop's thread waited on it all along).
++  RobotCommandMode next_mode;
++  {
++    std::unique_lock<std::mutex> lock(robot_state_mutex_, std::try_to_lock);
++    if (!lock.owns_lock()) {
++      return;  // (next cycle)
++    }
++    next_mode = next_robot_command_mode_;
++  }
++  if (current_robot_command_mode_ == next_mode) {
+     return;
+   }
+-  current_robot_command_mode_ = next_robot_command_mode_;
+ 
+   // Stop the robot before switching command modes
+   robot_->stopRobot();
+ 
+   // Handle the command mode switch
+-  if (current_robot_command_mode_ == RobotCommandMode::IDLE) {
+-    return;
+-  } else if (current_robot_command_mode_ == RobotCommandMode::JOINT_POSITION) {
++  if (next_mode == RobotCommandMode::JOINT_POSITION) {
+     robot_->initializeJointPositionInterface();
+-  } else if (current_robot_command_mode_ == RobotCommandMode::JOINT_VELOCITY) {
+-    async_hw_velocity_commands_.fill(0.0);
++  } else if (next_mode == RobotCommandMode::JOINT_VELOCITY) {
++    {
++      std::lock_guard<std::mutex> lock(command_mutex_);
++      async_hw_velocity_commands_.fill(0.0);
++    }
++    cmd_velocity_.fill(0.0);
+     filtered_velocity_commands_.fill(0.0);
+     robot_->initializeJointVelocityInterface();
+-  } else if (current_robot_command_mode_ == RobotCommandMode::EFFORT) {
+-    async_hw_effort_commands_.fill(0.0);
++  } else if (next_mode == RobotCommandMode::EFFORT) {
++    {
++      std::lock_guard<std::mutex> lock(command_mutex_);
++      async_hw_effort_commands_.fill(0.0);
++    }
++    cmd_effort_.fill(0.0);
+     robot_->initializeTorqueInterface();
+-  } else if (current_robot_command_mode_ == RobotCommandMode::CARTESIAN_POSE ||
+-             current_robot_command_mode_ == RobotCommandMode::CARTESIAN_POSE_WITH_ELBOW) {
++  } else if (next_mode == RobotCommandMode::CARTESIAN_POSE ||
++             next_mode == RobotCommandMode::CARTESIAN_POSE_WITH_ELBOW) {
+     robot_->initializeCartesianPoseInterface();
+-  } else if (current_robot_command_mode_ == RobotCommandMode::CARTESIAN_VELOCITY ||
+-             current_robot_command_mode_ == RobotCommandMode::CARTESIAN_VELOCITY_WITH_ELBOW) {
+-    async_hw_cartesian_velocities_.fill(0.0);
++  } else if (next_mode == RobotCommandMode::CARTESIAN_VELOCITY ||
++             next_mode == RobotCommandMode::CARTESIAN_VELOCITY_WITH_ELBOW) {
++    {
++      std::lock_guard<std::mutex> lock(command_mutex_);
++      async_hw_cartesian_velocities_.fill(0.0);
++    }
++    cmd_cartesian_velocities_.fill(0.0);
+     robot_->initializeCartesianVelocityInterface();
+   }
+ 
+   // Require a state read before commanding the robot with position-based command interfaces
+-  if (current_robot_command_mode_ == RobotCommandMode::JOINT_POSITION ||
+-      current_robot_command_mode_ == RobotCommandMode::CARTESIAN_POSE ||
+-      current_robot_command_mode_ == RobotCommandMode::CARTESIAN_POSE_WITH_ELBOW ||
+-      current_robot_command_mode_ == RobotCommandMode::CARTESIAN_VELOCITY_WITH_ELBOW) {
++  if (next_mode == RobotCommandMode::JOINT_POSITION ||
++      next_mode == RobotCommandMode::CARTESIAN_POSE ||
++      next_mode == RobotCommandMode::CARTESIAN_POSE_WITH_ELBOW ||
++      next_mode == RobotCommandMode::CARTESIAN_VELOCITY_WITH_ELBOW) {
+     is_internal_read_required_ = true;
+     is_external_read_required_ = true;
+   }
+ 
+-  // TODO: check if the elbow command is activated without cartesian command interface
++  std::lock_guard<std::mutex> lock(robot_state_mutex_);
++  current_robot_command_mode_ = next_mode;
+ }
+ 
+ void RobotCommunicationThread::read() {
+   // Read the robot state without blocking the ROS 2 control loop
+   temp_franka_robot_state_ = robot_->readOnce();
++  is_internal_read_required_ = false;
+ 
+-  {
+-    std::lock_guard<std::mutex> lock(robot_state_mutex_);
++  // (robot-station patch) Shared without waiting for the control loop's thread: when it holds the
++  // lock (it may be preempted while it does), it gets the state of the next cycle.
++  std::unique_lock<std::mutex> lock(robot_state_mutex_, std::try_to_lock);
++  if (lock.owns_lock()) {
+     current_robot_state_ = temp_franka_robot_state_;
+-    is_internal_read_required_ = false;
+   }
+ }
+ 
++void RobotCommunicationThread::snapshot_commands() {
++  // (robot-station patch) The control loop's commands copied without waiting for it: when it holds
++  // the lock, this cycle sends the last cycle's commands (a packet sent late is a packet lost).
++  std::unique_lock<std::mutex> lock(command_mutex_, std::try_to_lock);
++  if (!lock.owns_lock()) {
++    return;
++  }
++  cmd_effort_ = async_hw_effort_commands_;
++  cmd_position_ = async_hw_position_commands_;
++  cmd_velocity_ = async_hw_velocity_commands_;
++  cmd_cartesian_pose_ = async_hw_cartesian_pose_;
++  cmd_cartesian_velocities_ = async_hw_cartesian_velocities_;
++  cmd_elbow_ = async_hw_elbow_command_;
++}
++
+ void RobotCommunicationThread::filter_commands(std::chrono::steady_clock::time_point now) {
+   if (current_robot_command_mode_ != RobotCommandMode::JOINT_VELOCITY) {
+     return;  // Filtering is only applied for joint velocity commands
+   }
+ 
+-  // Ensure the command mutex is locked to prevent concurrent access
+-  std::lock_guard<std::mutex> lock(command_mutex_);
++  // (robot-station patch) On this thread's snapshot of the commands (snapshot_commands)
+ 
+   // Get the current time in seconds
+   acg_signal_processing::Timestamp current_time =
+@@ -103,7 +142,7 @@
+   for (size_t i = 0; i < N_JOINTS; ++i) {
+     acg_signal_processing::StampedDataPoint<1> sample;
+     sample.timestamp = current_time;
+-    sample.data[0] = async_hw_velocity_commands_[i];
++    sample.data[0] = cmd_velocity_[i];
+     iir_filters_[i].add_sample(sample);
+   }
+ 
+@@ -113,28 +152,28 @@
+       acg_signal_processing::DataPoint<1> filtered_sample = iir_filters_[i].sample(current_time);
+       filtered_velocity_commands_[i] = filtered_sample[0];
+     } else {
+-      iir_filters_[i].set_filter_state(async_hw_velocity_commands_[i]);
++      iir_filters_[i].set_filter_state(cmd_velocity_[i]);
+     }
+   }
+ }
+ 
+ void RobotCommunicationThread::write() {
+-  // state mutex is needed for reading the current command mode
+-  std::lock_guard<std::mutex> command_lock(command_mutex_), state_lock(robot_state_mutex_);
++  // (robot-station patch) No locks: this thread's snapshot of the commands (snapshot_commands),
++  // its latest state, its command mode (only this thread changes it).
+ 
+   if (current_robot_command_mode_ == RobotCommandMode::EFFORT &&
+-      !hasInfinite(async_hw_effort_commands_)) {
+-    robot_->writeOnce(async_hw_effort_commands_);
++      !hasInfinite(cmd_effort_)) {
++    robot_->writeOnce(cmd_effort_);
+   } else if (current_robot_command_mode_ == RobotCommandMode::JOINT_VELOCITY &&
+-             !hasInfinite(async_hw_velocity_commands_)) {
++             !hasInfinite(cmd_velocity_)) {
+     if (should_filter_ && !hasInfinite(filtered_velocity_commands_)) {
+       robot_->writeOnce(filtered_velocity_commands_);
+-    } else if (!hasInfinite(async_hw_velocity_commands_)) {
+-      robot_->writeOnce(async_hw_velocity_commands_);
++    } else if (!hasInfinite(cmd_velocity_)) {
++      robot_->writeOnce(cmd_velocity_);
+     }
+   } else if (current_robot_command_mode_ == RobotCommandMode::CARTESIAN_VELOCITY &&
+-             !hasInfinite(async_hw_cartesian_velocities_)) {
+-    robot_->writeOnce(async_hw_cartesian_velocities_);
++             !hasInfinite(cmd_cartesian_velocities_)) {
++    robot_->writeOnce(cmd_cartesian_velocities_);
+   }
+ 
+   // For position-based command interfaces, we need to wait until the first read pass after the
+@@ -146,34 +185,34 @@
+ 
+   const bool should_write_joint_position_commands =
+       current_robot_command_mode_ == RobotCommandMode::JOINT_POSITION &&
+-      !hasInfinite(async_hw_position_commands_) && !hasInfinite(async_hw_velocity_commands_);
++      !hasInfinite(cmd_position_) && !hasInfinite(cmd_velocity_);
+ 
+   const bool should_write_cartesian_pose_commands =
+-      !hasInfinite(async_hw_cartesian_pose_) &&
++      !hasInfinite(cmd_cartesian_pose_) &&
+       (current_robot_command_mode_ == RobotCommandMode::CARTESIAN_POSE ||
+        (current_robot_command_mode_ == RobotCommandMode::CARTESIAN_POSE_WITH_ELBOW &&
+-        !hasInfinite(async_hw_elbow_command_)));
++        !hasInfinite(cmd_elbow_)));
+ 
+   const bool should_write_cartesian_velocity_elbow_commands =
+       current_robot_command_mode_ == RobotCommandMode::CARTESIAN_VELOCITY_WITH_ELBOW &&
+-      !hasInfinite(async_hw_cartesian_velocities_) && !hasInfinite(async_hw_elbow_command_);
++      !hasInfinite(cmd_cartesian_velocities_) && !hasInfinite(cmd_elbow_);
+ 
+   if (should_write_joint_position_commands) {
+     // TODO: Implement the control strategy for joint and cartesian position commands
+     std::array<double, N_JOINTS> joint_position_command;
+     for (size_t i = 0; i < N_JOINTS; ++i) {
+       joint_position_command[i] =
+-          current_robot_state_.q_d[i] + async_hw_velocity_commands_[i] * DT +
+-          (async_hw_position_commands_[i] - current_robot_state_.q_d[i]) * lambda_;
++          temp_franka_robot_state_.q_d[i] + cmd_velocity_[i] * DT +
++          (cmd_position_[i] - temp_franka_robot_state_.q_d[i]) * lambda_;
+     }
+     robot_->writeOnce(joint_position_command);
+   } else if (should_write_cartesian_pose_commands) {
+     const Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::ColMajor>> current_cartesian_pose(
+-        current_robot_state_.O_T_EE_d.data());
++        temp_franka_robot_state_.O_T_EE_d.data());
+     const Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::ColMajor>> desired_cartesian_pose(
+-        async_hw_cartesian_pose_.data());
++        cmd_cartesian_pose_.data());
+     const Eigen::Map<const Eigen::Matrix<double, 6, 1>> desired_cartesian_twist(
+-        async_hw_cartesian_velocities_.data());
++        cmd_cartesian_velocities_.data());
+ 
+     Eigen::Matrix<double, 4, 4, Eigen::ColMajor> cartesian_pose_reference = current_cartesian_pose;
+ 
+@@ -197,12 +236,12 @@
+     }
+ 
+     if (current_robot_command_mode_ == RobotCommandMode::CARTESIAN_POSE_WITH_ELBOW) {
+-      robot_->writeOnce(cartesian_pose_command, async_hw_elbow_command_);
++      robot_->writeOnce(cartesian_pose_command, cmd_elbow_);
+     } else {
+       robot_->writeOnce(cartesian_pose_command);
+     }
+   } else if (should_write_cartesian_velocity_elbow_commands) {
+-    robot_->writeOnce(async_hw_cartesian_velocities_, async_hw_elbow_command_);
++    robot_->writeOnce(cmd_cartesian_velocities_, cmd_elbow_);
+   }
+ }
+ 
+@@ -216,14 +255,29 @@
    bool should_ignore_packet = false;
    int i = 0;
    while (true) {
@@ -62,10 +323,20 @@ diff -ru a/src/robot_communication_thread.cpp b/src/robot_communication_thread.c
 +        continue;
 +      }
 +
++      read();
++      snapshot_commands();
++
        if (should_filter_) {
          // Apply filters to the joint commands
          filter_commands(now);
-@@ -236,11 +253,50 @@
+       }
+ 
+-      read();
+-
+       should_ignore_packet = false;
+       now = std::chrono::steady_clock::now();
+       measured_period = std::chrono::duration<double>(now - old_now).count();
+@@ -236,14 +290,53 @@
  
        perform_command_mode_switch();
  
@@ -77,10 +348,10 @@ diff -ru a/src/robot_communication_thread.cpp b/src/robot_communication_thread.c
        i++;
 +    } catch (const std::exception& e) {
 +      on_fault(e);
-+    }
-+  }
-+}
-+
+     }
+   }
+ }
+ 
 +void RobotCommunicationThread::on_fault(const std::exception& e) {
 +  RCLCPP_ERROR(logger_, "Control stopped: %s. Restarting it when the robot is idle again (error recovery).",
 +               e.what());
@@ -104,16 +375,19 @@ diff -ru a/src/robot_communication_thread.cpp b/src/robot_communication_thread.c
 +  } catch (const std::exception& e) {
 +    if (++read_errors_ % 100 == 1) {
 +      RCLCPP_ERROR(logger_, "Reading the robot's state: %s", e.what());
-     }
++    }
 +    std::this_thread::sleep_for(10ms);
 +    return;
 +  }
 +  read_errors_ = 0;
 +  // At least a second after the fault (a start that fails at once is not retried in a loop).
-+  if (current_robot_state_.robot_mode == franka::RobotMode::kIdle &&
++  if (temp_franka_robot_state_.robot_mode == franka::RobotMode::kIdle &&
 +      std::chrono::steady_clock::now() - fault_time_ > 1s) {
 +    RCLCPP_INFO(logger_, "The robot is idle: restarting control.");
 +    is_faulted_ = false;
-   }
- }
++  }
++}
++
+ // ------ PUBLIC MEMBER FUNCTIONS ------
  
+ void RobotCommunicationThread::set_filter_commands(bool should_filter) {
