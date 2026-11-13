@@ -196,7 +196,7 @@ class Follower(Node):
 def add_driver_args(p):
   p.add_argument('--robot', default='panda', choices=sorted(drivers.ROBOTS))
   p.add_argument('--driver', default='real', choices=['real', 'fake'], help='what ros2_control runs (for the status)')
-  p.add_argument('--speed', type=float, default=0.5, help='fraction of the joints\' max speeds commanded at most')
+  p.add_argument('--speed', type=float, default=0.1, help='fraction of the joints\' max speeds commanded at most')
   p.add_argument('--timeout', type=float, default=0.3, help='s without targets before the robot holds')
   p.add_argument('--hw-ns', default='/franka', help='the robot\'s ros2_control (launch/robot.launch.py)')
   p.add_argument('--controller', default='', help='the arm\'s trajectory controller (default <hw-ns>/joint_trajectory_controller)')

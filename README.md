@@ -36,7 +36,7 @@ On the robot's computer (a PREEMPT_RT kernel, Docker with compose):
 
 ```bash
 ./station.sh up --build                                   # a fake robot: try everything without hardware
-DRIVER=real ROBOT_IP=172.16.0.2 SPEED=0.3 ./station.sh up  # the Panda (FCI active in Desk, E-stop at hand)
+DRIVER=real ROBOT_IP=172.16.0.2 ./station.sh up  # the Panda (FCI active in Desk, E-stop at hand)
 DRIVER=real RVIZ=true ./station.sh up                     # with rviz2: the robot, /tf
 ```
 
@@ -62,7 +62,7 @@ this computer's display (`station.sh` runs `xhost +local:`):
 | `CONTROL` | `auto` | the arm: `effort` (torques: joint impedance tracking, `config/controllers_effort.yaml`), `position` (the robot's motion generator), `auto`: effort on the real robot, position on the mock hardware |
 | `FOLLOWER` | `true` | the lobby's teleop; `false` when another client (giskard's `hw.py`) commands the arm |
 | `RVIZ` | `false` | rviz2 (`config/station.rviz`) |
-| `SPEED` | `0.5` | fraction of the joints' max speeds commanded at most |
+| `SPEED` | `0.1` | fraction of the joints' max speeds commanded at most |
 | `LOOKAHEAD` | `0.05` | s: each command a trajectory point the controller reaches in this long |
 | `GRASP_FORCE` | `20` | N |
 | `ROSBRIDGE_PORT` / `WEB_PORT` | `9090` / `8080` | the lobby's Bridge, the station's page |

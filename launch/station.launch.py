@@ -9,7 +9,7 @@ robot_station/cameras.py) and their extrinsics (<calibration>, default
 calibration.yaml: robot_station/calibrate.py) as static transforms.
 
     ros2 launch launch/station.launch.py driver:=fake
-    ros2 launch launch/station.launch.py driver:=real ip:=172.16.0.2 speed:=0.3
+    ros2 launch launch/station.launch.py driver:=real ip:=172.16.0.2 speed:=0.2
     ros2 launch launch/station.launch.py driver:=real follower:=false     (giskard: python3 -m robot_station.hw)
 """
 
@@ -37,7 +37,7 @@ def generate_launch_description():
       ('hardware', 'true', 'start the robot\'s ros2_control (launch/robot.launch.py)'),
       ('follower', 'true', 'the lobby\'s teleop (off: another client commands the arm, e.g. hw.py)'),
       ('rviz', 'false', 'rviz2 (config/station.rviz)'),
-      ('speed', '0.5', 'fraction of the joints\' max speeds commanded at most'),
+      ('speed', '0.1', 'fraction of the joints\' max speeds commanded at most'),
       ('lookahead', '0.05', 's: each command a trajectory point reached in this long'),
       ('grasp_force', '20', 'Panda: N'),
       ('rosbridge_port', '9090', 'the lobby\'s Bridge'),

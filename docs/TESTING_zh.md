@@ -100,7 +100,7 @@ Quest 浏览器打开 `chrome://flags`，在 "Insecure origins treated as secure
    - 在本仓库网页上录一段：填任务，Start，在 Lobby 里动一动，Stop & keep。Episodes 里应该出现这一段，消息数大于 0。
 2. **接真机，先在电脑浏览器上测，不戴头显**：
    ```bash
-   DRIVER=real ROBOT_IP=172.16.0.2 SPEED=0.2 ./station.sh up
+   DRIVER=real ROBOT_IP=172.16.0.2 ./station.sh up
    ```
    1. 影子是蓝色，显示的是真机当前的位置。
    2. 按 **Enable**：Lobby 先把仿真机器人同步到真机的姿态，再使能，影子变绿。
@@ -109,12 +109,12 @@ Quest 浏览器打开 `chrome://flags`，在 "Insecure origins treated as secure
 3. **测安全机制**：
    - 关掉 Lobby 网页或断开 Wi-Fi：真机 0.3 s 内停住，1 s 后自动失能。
    - 按外部急停：状态变成 fault（影子变红）。松开急停后，再按 Enable 就能恢复（跟随节点会先调用 `/franka/action_server/error_recovery`）。
-   - 如果 `ros2_control_node` 退出了（看 `./station.sh up` 的输出），整个 station 会跟着退出，重新 `up` 即可。
+   - 触发 reflex（比如 `communication_constraints_violation`）时控制会停下，但 `ros2_control_node` 和 station 不会退出：状态变成 fault，按 Enable 恢复。
    - Disable：真机停在当前位置。
 4. **戴上 Quest**：
    - 进入 VR，按住 Y 打开菜单，进 Real robot → Enable。
    - 抓住 marker 移动，扣扳机控制夹爪。
-   - 熟悉之后再把 `SPEED` 调到 0.3–0.5。
+   - 默认 `SPEED=0.1`（关节最大速度的 10%）。熟悉之后可以调高，0.2 已经比较快。
 5. **共享世界（server 模式）**：Lobby 用 `npm run server` 启动，PC 浏览器负责 ROS 和 Enable，Quest 只负责操作，见 robot-lobby 的 `docs`。
 
 录的数据在 `./data/episodes/<日期-时间>/`：`bag/`（rosbag2，mcap）和 `meta.json`。
