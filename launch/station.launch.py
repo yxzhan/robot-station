@@ -4,8 +4,9 @@ running elsewhere), rosbridge_server (the lobby connects to it: its ROS
 panel's Bridge, <this computer>:<rosbridge_port>), the follower
 (robot_station/follower.py: the real robot follows the lobby's, through its
 ros2_control), the web page (robot_station/web.py: http://<this computer>:<web_port>/,
-recording to <data>) and the cameras (<cameras>, default cameras.yaml:
-robot_station/cameras.py).
+recording to <data>), the cameras (<cameras>, default cameras.yaml:
+robot_station/cameras.py) and their extrinsics (<calibration>, default
+calibration.yaml: robot_station/calibrate.py) as static transforms.
 
     ros2 launch launch/station.launch.py driver:=fake
     ros2 launch launch/station.launch.py driver:=real ip:=172.16.0.2 speed:=0.3
@@ -24,7 +25,7 @@ from launch_ros.actions import Node
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
-from robot_station import cameras  # noqa: E402
+from robot_station import calibrate, cameras  # noqa: E402
 
 
 def generate_launch_description():
@@ -42,6 +43,7 @@ def generate_launch_description():
       ('web_port', '8080', 'the station\'s page'),
       ('data', str(REPO / 'data'), 'where episodes go'),
       ('cameras', str(cameras.DEFAULT), 'the cameras (none if the file is not there)'),
+      ('calibration', str(calibrate.DEFAULT_OUT), 'the cameras\' extrinsics, published as static /tf (robot_station/calibrate.py)'),
   ]
   py = lambda module, *a, **kw: ExecuteProcess(cmd=[sys.executable, '-m', module, *a], cwd=str(REPO), output='screen',
                                                additional_env={'PYTHONUNBUFFERED': '1'}, **kw)
@@ -57,4 +59,5 @@ def generate_launch_description():
       py('robot_station.web', '--robot', C('robot'), '--driver', C('driver'), '--port', C('web_port'), '--data', C('data'),
          '--cameras', C('cameras')),
       OpaqueFunction(function=lambda context: cameras.nodes(cameras.load(C('cameras').perform(context)))),
+      OpaqueFunction(function=lambda context: calibrate.static_tf_nodes(C('calibration').perform(context))),
   ])

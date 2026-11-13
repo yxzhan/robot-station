@@ -148,6 +148,46 @@ Quest 浏览器打开 `chrome://flags`，在 "Insecure origins treated as secure
 - USB 相机报 `Cannot open device`：路径不对，或者权限（`ls -l /dev/video*` 看组是不是 video）。
 - 多个相机加起来带宽不够时，降分辨率或帧率；USB 相机用 `mjpeg2rgb`。
 
+### 相机标定（手眼标定）
+
+用 ChArUco 标定板。结果写进 `calibration.yaml`，station 启动时会把它作为 static TF 发出去，相机就和机器人在同一棵 `/tf` 树里了。
+
+| 相机 | `--mode` | 标定板放哪 | 写进去的变换 |
+|---|---|---|---|
+| 手腕上的 RealSense | `hand` | 固定在桌上，不动 | `fer_hand` → `wrist_link` |
+| 第三视角相机 | `base` | 固定在夹爪上（夹紧或者用支架装在手上） | `base` → 相机 |
+
+1. **打印标定板**：
+   ```bash
+   ./station.sh run --rm station python3 -m robot_station.calibrate board --out data/board.png                                # A4，方格 3.5 cm
+   ./station.sh run --rm station python3 -m robot_station.calibrate board --square 0.05 --marker 0.037 --out data/board_a3.png  # A3，方格 5 cm
+   ```
+   - 按 100% 打印，不要勾"适合页面"。贴在平整、硬的板子上（亚克力、铝板、厚纸板都行），不能翘。
+   - 用尺子量一个方格和一个 marker 的边长，后面用 `--square`、`--marker` 传进去，单位是米。打印机常常会缩放，**以量出来的为准**。
+   - 第三视角相机离得远，用 A3 那张。
+2. **第三视角相机如果是 USB 相机，先标内参**。RealSense 有出厂内参，可以跳过这一步。
+   ```bash
+   ./station.sh exec station ros2 run camera_calibration cameracalibrator --size 8x6 --square 0.025 \
+     --ros-args -r image:=/cameras/front/color/image_raw -r camera:=/cameras/front/color
+   ```
+   标完后把结果保存成文件，在 `cameras.yaml` 这台相机的 `params:` 里加上 `camera_info_url: file:///repo/data/front.yaml`，再重启 station。
+3. **启动 station**：真机加上 `cameras.yaml` 里的相机。用 Lobby 遥操移动机器人，或者 `FOLLOWER=false` 之后用别的方式移动。
+4. **标定手腕相机**：标定板固定在桌上。
+   ```bash
+   ./station.sh exec station python3 -m robot_station.calibrate run --camera wrist --mode hand --square 0.035 --marker 0.026
+   ```
+   - 另开 `rqt_image_view` 看 `/calibration/wrist/image/compressed`，能看到检测到的角点和标定板的坐标轴。
+   - 每到一个姿态，等机器人停稳，按回车采一个样。加 `--auto` 的话，停稳了会自动采。
+   - 采 15–25 个样。每个样本里标定板尽量完整，**斜着看**（20–40°，正对着看算出来的姿态不准）。远近都要有。最重要的是让手绕不同的轴转，所有样本加起来要转过 60° 以上。
+   - `s` 求解：打印 5 种方法的残差和结论。残差要在 3 mm、0.5° 以内，结论是 `good` 才算标好。`w` 写入 `calibration.yaml`。
+   - 结果不好：看 `the sample furthest off` 是哪一张，用 `d` 删掉最后一个样本，或者事后用 `solve --drop 007.jpg --write` 重新求解。样本都存在 `data/calibration/<相机>-<时间>/` 里。
+5. **标定第三视角相机**：标定板固定在手上，相机不动。
+   ```bash
+   ./station.sh exec station python3 -m robot_station.calibrate run --camera front --mode base --square 0.05 --marker 0.037
+   ```
+   步骤同上，让手带着标定板在相机前面转。
+6. **重启 station**，在 rviz 里检查：`RVIZ=true` 启动，加上 TF 显示，相机坐标系应该在实际安装的位置。也可以把夹爪尖碰到桌上一个点，看相机图像里的位置对不对。
+
 ---
 
 ## B. giskard demo

@@ -114,6 +114,39 @@ What is connected: `./station.sh run --rm station python3 -m robot_station.camer
 The container sees the host's `/dev` (cameras re-enumerate); RealSense needs librealsense's udev
 rule on the host (docs/TESTING_zh.md). Each episode's `meta.json` lists its cameras.
 
+## Camera calibration
+
+`python3 -m robot_station.calibrate` (hand-eye, a ChArUco board; the maths in
+`robot_station/calibration.py`) writes each camera's pose to `calibration.yaml`; the station
+publishes them as static transforms (`calibration:=`), so the cameras are in `/tf` with the robot.
+
+| `--mode` | the camera | the board | written |
+|---|---|---|---|
+| `hand` | on the robot (the wrist RealSense) | still, on the table | `fer_hand` → the camera |
+| `base` | still (a third person view) | fixed to the hand | `base` → the camera |
+
+The camera's frame is its image's (`<name>_color_optical_frame`); a RealSense has a tree of its own
+under `<name>_link` (realsense2_camera's `publish_tf`), so for it `<name>_link` is written.
+
+```bash
+./station.sh run --rm station python3 -m robot_station.calibrate board --out data/board.png            # A4 (3.5 cm squares)
+./station.sh run --rm station python3 -m robot_station.calibrate board --square 0.05 --marker 0.037 --out data/board_a3.png
+./station.sh exec station python3 -m robot_station.calibrate run --camera wrist --mode hand --square 0.035 --marker 0.026
+./station.sh exec station python3 -m robot_station.calibrate run --camera front --mode base --square 0.05 --marker 0.037
+./station.sh exec station python3 -m robot_station.calibrate solve data/calibration/wrist-<time> --drop 007.jpg --write
+```
+
+Print at 100 %, on something flat and rigid, and pass the square and marker sizes **as measured**.
+With the station running (the robot's `/tf`, the camera): move the robot, let it rest, Enter takes a
+sample (`--auto`: taken by itself when the robot rests somewhere new); `s` solves with OpenCV's five
+methods and prints their residuals, `w` writes the best, `d` drops the last sample, `q` quits. Take
+15 to 25 samples, the hand turned 60° and more about different axes over them, the board seen at an
+angle (20–40°, not square on) and mostly whole. The samples (images, poses) stay in
+`data/calibration/<camera>-<time>/` for `solve`. The annotated image: `/calibration/<camera>/image/compressed`
+(`rqt_image_view`; `--window` opens one). Intrinsics come from `camera_info`: a RealSense's are
+the factory's; a USB camera needs its own first (`ros2 run camera_calibration cameracalibrator`, then
+usb_cam's `camera_info_url` in `params:`).
+
 ## Teleoperate
 
 In the lobby: spawn the Franka Emika Panda (`aicor/franka_emika_panda`, profile prefix `panda`),
@@ -181,12 +214,18 @@ are accepted and ignored.
 ros2 launch launch/station.launch.py driver:=fake &      # (or ./station.sh up)
 python3 tests/smoke.py                                    # (or ./station.sh exec station python3 tests/smoke.py)
 python3 tests/smoke_hw.py
+python3 tests/test_calibration.py                         # (no ROS: the calibration's maths on synthetic views)
+ros2 launch launch/station.launch.py driver:=fake follower:=false &
+python3 tests/smoke_calibrate.py --mode hand --link       # (and --mode base)
 ```
 
 `smoke.py` stands in for the lobby: publishes the target, enables, moves the arm, closes and opens
 the hand, records an episode over ROS and checks the bag (with cameras, also their images: try a
 `cameras.yaml` of `fake` ones). `smoke_hw.py` runs `hw.py` and stands in for giskard: velocities in,
-the arm moved, the gripper action. Both through ros2_control's mock hardware.
+the arm moved, the gripper action. Both through ros2_control's mock hardware. `smoke_calibrate.py`
+moves the arm through random poses while a simulated camera (`tests/sim_board_camera.py`) sees a board
+from `/tf` with a made up mount, calibrates through `calibrate run`'s keys and checks what is written
+against the mount (`--link`: a RealSense like `<name>_link` tree).
 
 ## Layout
 
@@ -196,6 +235,8 @@ robot_station/hw.py         the same as giskard's ros2_control hardware
 robot_station/safety.py     limits, speed, start tolerance, timeouts, falling behind
 robot_station/drivers/      per robot: its spec (panda.py) and the client of its ros2_control (franka.py)
 robot_station/fake_gripper.py  franka_gripper_node's stand-in (driver:=fake)
+robot_station/calibrate.py  camera calibration (ROS: samples, calibration.yaml; the static transforms)
+robot_station/calibration.py  its maths: the ChArUco board, the hand-eye solve, residuals
 robot_station/recorder.py   episodes: ros2 bag record, meta.json
 robot_station/cameras.py    cameras.yaml: the camera nodes, their topics; what is connected
 robot_station/fake_camera.py  a test pattern camera
