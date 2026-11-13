@@ -14,7 +14,11 @@ builds it). Nothing of the station talks to the robot but this; the follower
     franka_robot_state_broadcaster   /franka/franka_robot_state_broadcaster/
                                      robot_state (errors, robot mode; real)
     joint_trajectory_controller      the arm: /franka/joint_trajectory_controller/
-                                     joint_trajectory, .../follow_joint_trajectory
+                                     joint_trajectory, .../follow_joint_trajectory;
+                                     control:=effort (the real robot's default)
+                                     torques: joint impedance tracking
+                                     (config/controllers_effort.yaml), position
+                                     the robot's motion generator
   action_server              ~/error_recovery (franka_msgs/action/ErrorRecovery;
                              the hardware interface's node, real only)
   fer_gripper                franka_gripper_node (real) or
@@ -41,6 +45,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 ARM_ID = 'fer'
 NS = 'franka'  # (giskard's demo runs a ros2_control of its own: /controller_manager, /robot_description)
 CONTROLLERS = str(REPO / 'config' / 'controllers.yaml')
+EFFORT = str(REPO / 'config' / 'controllers_effort.yaml')  # control:=effort, over CONTROLLERS
 
 
 def description(real, ip, hand, rate_limit, low_pass, gain):
@@ -62,13 +67,19 @@ def nodes(context):
   real = v('driver') == 'real'
   hand = v('hand') == 'true'
   urdf = description(real, v('ip'), 'true' if hand else 'false', v('rate_limit'), v('low_pass'), v('gain'))
+  control = v('control')
+  if control == 'auto':  # (the mock hardware does not simulate torques: position)
+    control = 'effort' if real else 'position'
+  if control not in ('effort', 'position'):
+    raise ValueError(f'control:={control}: effort, position or auto')
+  print(f'[robot.launch] the arm {control} controlled')
   spawn = lambda name, *extra: Node(package='controller_manager', executable='spawner', output='screen', namespace=NS,
                                     arguments=[name, '--controller-manager', f'/{NS}/controller_manager', *extra])
   out = [
       Node(package='robot_state_publisher', executable='robot_state_publisher', output='screen', namespace=NS,
            parameters=[{'robot_description': urdf}]),
       Node(package='controller_manager', executable='ros2_control_node', output='screen', namespace=NS,
-           parameters=[CONTROLLERS, {'robot_description': urdf}],
+           parameters=[CONTROLLERS, *([EFFORT] if control == 'effort' else []), {'robot_description': urdf}],
            remappings=[('~/robot_description', f'/{NS}/robot_description')],
            on_exit=Shutdown()),
       spawn('joint_state_broadcaster', '--controller-ros-args', f'-r /{NS}/joint_states:=/{NS}/arm_joint_states'),
@@ -102,6 +113,8 @@ def generate_launch_description():
       ('driver', 'fake', 'real: the Panda (FCI) | fake: ros2_control\'s mock hardware, a fake hand'),
       ('ip', '172.16.0.2', 'the Panda\'s FCI address'),
       ('hand', 'true', 'the Franka Hand'),
+      ('control', 'auto', 'the arm: effort (torques, joint impedance: config/controllers_effort.yaml) | '
+                          'position | auto: effort on the real robot, position on the mock hardware'),
       ('rate_limit', 'true', 'the hardware interface\'s rate limiter on position commands'),
       ('low_pass', 'true', 'its low pass filter on position commands'),
       ('gain', '0.001', 'its position control gain (lambda: the pull from the desired towards the commanded position)'),

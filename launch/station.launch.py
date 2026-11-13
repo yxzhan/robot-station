@@ -33,6 +33,7 @@ def generate_launch_description():
       ('robot', 'panda', 'the robot (robot_station/drivers)'),
       ('driver', 'fake', 'real: the Panda | fake: ros2_control\'s mock hardware'),
       ('ip', '172.16.0.2', 'Panda: its FCI address'),
+      ('control', 'auto', 'the arm: effort (torques) | position | auto (effort on the real robot): launch/robot.launch.py'),
       ('hardware', 'true', 'start the robot\'s ros2_control (launch/robot.launch.py)'),
       ('follower', 'true', 'the lobby\'s teleop (off: another client commands the arm, e.g. hw.py)'),
       ('rviz', 'false', 'rviz2 (config/station.rviz)'),
@@ -50,7 +51,8 @@ def generate_launch_description():
   return LaunchDescription([
       *[DeclareLaunchArgument(n, default_value=v, description=d) for n, v, d in args],
       IncludeLaunchDescription(PythonLaunchDescriptionSource(str(REPO / 'launch' / 'robot.launch.py')),
-                               launch_arguments={'driver': C('driver'), 'ip': C('ip'), 'rviz': C('rviz')}.items(),
+                               launch_arguments={'driver': C('driver'), 'ip': C('ip'), 'rviz': C('rviz'),
+                                                 'control': C('control')}.items(),
                                condition=IfCondition(C('hardware'))),
       Node(package='rosbridge_server', executable='rosbridge_websocket', output='screen',
            parameters=[{'port': C('rosbridge_port')}]),

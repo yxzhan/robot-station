@@ -1,0 +1,23 @@
+# The arm torque controlled (launch/robot.launch.py control:=effort, the
+# default on the real robot), over config/controllers.yaml: the same
+# joint_trajectory_controller, its PID on the joints' position and velocity
+# errors the torques sent (the robot adds gravity), i.e. joint impedance
+# tracking of the streamed trajectories as serl / franky's
+# JointImpedanceTrackingMotion. No motion generator on the robot: a lost
+# packet keeps the last torque a little longer instead of a
+# joint_motion_generator_*_discontinuity reflex. The hardware interface limits
+# the torques' rate (1000 Nm/s).
+#
+# Stiffness (p, Nm/rad): libfranka's joint impedance example; damping (d,
+# Nms/rad): franka_ros2's joint impedance example's.
+/**/joint_trajectory_controller:
+  ros__parameters:
+    command_interfaces: [effort]
+    gains:
+      fer_joint1: {p: 600.0, d: 30.0, i: 0.0, i_clamp: 0.0}
+      fer_joint2: {p: 600.0, d: 30.0, i: 0.0, i_clamp: 0.0}
+      fer_joint3: {p: 600.0, d: 30.0, i: 0.0, i_clamp: 0.0}
+      fer_joint4: {p: 600.0, d: 30.0, i: 0.0, i_clamp: 0.0}
+      fer_joint5: {p: 250.0, d: 10.0, i: 0.0, i_clamp: 0.0}
+      fer_joint6: {p: 150.0, d: 10.0, i: 0.0, i_clamp: 0.0}
+      fer_joint7: {p: 50.0, d: 5.0, i: 0.0, i_clamp: 0.0}

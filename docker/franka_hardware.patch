@@ -1,0 +1,119 @@
+diff -ru a/include/franka_hardware/robot_communication_thread.hpp b/include/franka_hardware/robot_communication_thread.hpp
+--- a/franka_hardware/include/franka_hardware/robot_communication_thread.hpp	2026-11-13 14:32:22.000000000 +0100
++++ b/franka_hardware/include/franka_hardware/robot_communication_thread.hpp	2026-11-13 15:11:56.184805633 +0100
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <array>
++#include <chrono>
+ #include <atomic>
+ #include <iostream>
+ #include <memory>
+@@ -75,6 +76,8 @@
+   void read();
+   void write();
+   void perform_command_mode_switch();
++  void on_fault(const std::exception& e);
++  void wait_for_recovery();
+ 
+   void filter_commands(std::chrono::steady_clock::time_point now);
+ 
+@@ -101,6 +104,11 @@
+   // Module enabled
+   std::atomic<bool> is_enabled_{false};
+ 
++  // (robot-station patch) Control stopped by an exception, until the robot is idle again
++  std::atomic<bool> is_faulted_{false};
++  std::chrono::steady_clock::time_point fault_time_;
++  int read_errors_ = 0;
++
+   // Full robot state
+   franka::RobotState current_robot_state_;
+   franka::RobotState temp_franka_robot_state_;
+diff -ru a/src/robot_communication_thread.cpp b/src/robot_communication_thread.cpp
+--- a/franka_hardware/src/robot_communication_thread.cpp	2026-11-13 14:32:22.000000000 +0100
++++ b/franka_hardware/src/robot_communication_thread.cpp	2026-11-13 15:11:56.184805633 +0100
+@@ -1,5 +1,8 @@
+ #include <cassert>
++#include <chrono>
++#include <exception>
+ #include <mutex>
++#include <thread>
+ 
+ #include <franka/control_tools.h>
+ #include <franka/rate_limiting.h>
+@@ -216,7 +219,21 @@
+   bool should_ignore_packet = false;
+   int i = 0;
+   while (true) {
+-    if (is_enabled_) {
++    // (robot-station patch) Not spinning on a SCHED_FIFO 99 thread while disabled.
++    if (!is_enabled_) {
++      std::this_thread::sleep_for(1ms);
++      continue;
++    }
++    // (robot-station patch) A reflex, a lost connection: control stops, the thread keeps
++    // reading the robot's state, and restarts control once the robot is idle again
++    // (error recovery), instead of the exception ending ros2_control_node.
++    try {
++      if (is_faulted_) {
++        wait_for_recovery();
++        old_now = std::chrono::steady_clock::now();
++        continue;
++      }
++
+       if (should_filter_) {
+         // Apply filters to the joint commands
+         filter_commands(now);
+@@ -236,11 +253,50 @@
+ 
+       perform_command_mode_switch();
+ 
+-      if (!should_ignore_packet) {
++      // (robot-station patch) Torques are always sent: a packet not sent is a packet lost.
++      if (!should_ignore_packet || current_robot_command_mode_ == RobotCommandMode::EFFORT) {
+         write();
+       }
+       i++;
++    } catch (const std::exception& e) {
++      on_fault(e);
++    }
++  }
++}
++
++void RobotCommunicationThread::on_fault(const std::exception& e) {
++  RCLCPP_ERROR(logger_, "Control stopped: %s. Restarting it when the robot is idle again (error recovery).",
++               e.what());
++  try {
++    robot_->stopRobot();
++  } catch (const std::exception& stop_error) {
++    RCLCPP_ERROR(logger_, "Stopping control: %s", stop_error.what());
++  }
++  {
++    std::lock_guard<std::mutex> lock(robot_state_mutex_);
++    current_robot_command_mode_ = RobotCommandMode::IDLE;  // (the next switch starts control again)
++  }
++  fault_time_ = std::chrono::steady_clock::now();
++  is_faulted_ = true;
++}
++
++void RobotCommunicationThread::wait_for_recovery() {
++  using namespace std::chrono_literals;
++  try {
++    read();
++  } catch (const std::exception& e) {
++    if (++read_errors_ % 100 == 1) {
++      RCLCPP_ERROR(logger_, "Reading the robot's state: %s", e.what());
+     }
++    std::this_thread::sleep_for(10ms);
++    return;
++  }
++  read_errors_ = 0;
++  // At least a second after the fault (a start that fails at once is not retried in a loop).
++  if (current_robot_state_.robot_mode == franka::RobotMode::kIdle &&
++      std::chrono::steady_clock::now() - fault_time_ > 1s) {
++    RCLCPP_INFO(logger_, "The robot is idle: restarting control.");
++    is_faulted_ = false;
+   }
+ }
+ 

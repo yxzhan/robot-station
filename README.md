@@ -59,6 +59,7 @@ this computer's display (`station.sh` runs `xhost +local:`):
 |---|---|---|
 | `DRIVER` | `fake` | `real` (franka_ros2's hardware interface) or `fake` (ros2_control's mock hardware) |
 | `ROBOT` / `ROBOT_IP` | `panda` / `172.16.0.2` | the robot, the Panda's FCI address |
+| `CONTROL` | `auto` | the arm: `effort` (torques: joint impedance tracking, `config/controllers_effort.yaml`), `position` (the robot's motion generator), `auto`: effort on the real robot, position on the mock hardware |
 | `FOLLOWER` | `true` | the lobby's teleop; `false` when another client (giskard's `hw.py`) commands the arm |
 | `RVIZ` | `false` | rviz2 (`config/station.rviz`) |
 | `SPEED` | `0.5` | fraction of the joints' max speeds commanded at most |
@@ -89,6 +90,14 @@ workspace built as in `docker/Dockerfile` and sourced; for cameras `ros-jazzy-re
 
 The hardware interface's rate limiter and low pass filter on position commands, and its position
 gain, are the launch file's `rate_limit`, `low_pass`, `gain`.
+
+The real arm is torque controlled by default (`control:=effort`): joint_trajectory_controller's PID
+on the effort interface, i.e. joint impedance tracking (the robot adds gravity). No motion generator
+on the robot, so a late or lost packet is no discontinuity reflex: on the Panda it rides out the
+control loop stalling up to 20 ms (30 ms ends in `communication_constraints_violation`), where
+position control aborts on the host's ~10 ms stalls. franka_hardware is patched
+(`docker/franka_hardware.patch`): a reflex stops control instead of ending `ros2_control_node`, and
+control restarts by itself once the robot is idle again (`~/error_recovery`, the station's Enable).
 
 ```bash
 ./station.sh exec station ros2 control list_controllers -c /franka/controller_manager

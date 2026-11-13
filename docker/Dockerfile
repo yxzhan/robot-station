@@ -53,6 +53,12 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
       mesa-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# Patched (docker/franka_hardware.patch): its communication thread catches the
+# exception a reflex throws (it ended ros2_control_node) and restarts control
+# once the robot is idle again (error recovery); torques are sent every cycle
+# (it skipped a packet on a jittery period); it sleeps instead of spinning at
+# SCHED_FIFO 99 while disabled.
+COPY docker/franka_hardware.patch /tmp/franka_hardware.patch
 SHELL ["/bin/bash", "-c"]
 RUN mkdir -p /opt/franka_ws/src && cd /opt/franka_ws/src \
     && fetch() { git init -q "$1" && git -C "$1" fetch -q --depth 1 "$2" "$3" && git -C "$1" checkout -q FETCH_HEAD; } \
@@ -60,6 +66,7 @@ RUN mkdir -p /opt/franka_ws/src && cd /opt/franka_ws/src \
     && git -C libfranka submodule update -q --init --recursive --depth 1 \
     && fetch franka_ros2 "${FRANKA_ROS2_REPO}" "${FRANKA_ROS2_COMMIT}" \
     && fetch franka_description "${FRANKA_DESCRIPTION_REPO}" "${FRANKA_DESCRIPTION_COMMIT}" \
+    && git -C franka_ros2 apply /tmp/franka_hardware.patch \
     && cd /opt/franka_ws && source /opt/ros/jazzy/setup.bash \
     && colcon build --packages-up-to franka_hardware franka_gripper franka_robot_state_broadcaster franka_description franka_msgs \
          --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF \
