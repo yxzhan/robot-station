@@ -129,10 +129,10 @@ The camera's frame is its image's (`<name>_color_optical_frame`); a RealSense ha
 under `<name>_link` (realsense2_camera's `publish_tf`), so for it `<name>_link` is written.
 
 ```bash
-./station.sh run --rm station python3 -m robot_station.calibrate board --out data/board.png            # A4 (3.5 cm squares)
-./station.sh run --rm station python3 -m robot_station.calibrate board --square 0.05 --marker 0.037 --out data/board_a3.png
+./station.sh run --rm station python3 -m robot_station.calibrate board --out data/board.pdf            # an A4 page: 7x5, 3.5 cm squares
+./station.sh run --rm station python3 -m robot_station.calibrate board --squares 6x4 --square 0.045 --marker 0.034 --out data/board_far.pdf   # A4, bigger squares (a far camera)
 ./station.sh exec station python3 -m robot_station.calibrate run --camera wrist --mode hand --square 0.035 --marker 0.026
-./station.sh exec station python3 -m robot_station.calibrate run --camera front --mode base --square 0.05 --marker 0.037
+./station.sh exec station python3 -m robot_station.calibrate run --camera front --mode base --squares 6x4 --square 0.045 --marker 0.034
 ./station.sh exec station python3 -m robot_station.calibrate solve data/calibration/wrist-<time> --drop 007.jpg --write
 ```
 

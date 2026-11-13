@@ -159,12 +159,14 @@ Quest 浏览器打开 `chrome://flags`，在 "Insecure origins treated as secure
 
 1. **打印标定板**：
    ```bash
-   ./station.sh run --rm station python3 -m robot_station.calibrate board --out data/board.png                                # A4，方格 3.5 cm
-   ./station.sh run --rm station python3 -m robot_station.calibrate board --square 0.05 --marker 0.037 --out data/board_a3.png  # A3，方格 5 cm
+   ./station.sh run --rm station python3 -m robot_station.calibrate board --out data/board.pdf                       # A4，7x5，方格 3.5 cm（手腕相机）
+   ./station.sh run --rm station python3 -m robot_station.calibrate board --squares 6x4 --square 0.045 --marker 0.034 \
+     --out data/board_far.pdf                                                                                          # A4，6x4，方格 4.5 cm（第三视角相机）
    ```
    - 按 100% 打印，不要勾"适合页面"。贴在平整、硬的板子上（亚克力、铝板、厚纸板都行），不能翘。
    - 用尺子量一个方格和一个 marker 的边长，后面用 `--square`、`--marker` 传进去，单位是米。打印机常常会缩放，**以量出来的为准**。
-   - 第三视角相机离得远，用 A3 那张。
+   - 生成的是 A4 页面的 PDF，下面有一条 10 cm 的刻度线，打印后先量这条线确认没有缩放。
+   - 第三视角相机离得远，用方格大的那张（6x4，4.5 cm），运行时加 `--squares 6x4 --square 0.045 --marker 0.034`（以实测为准）。相机离标定板最好不超过 1 m。
 2. **第三视角相机如果是 USB 相机，先标内参**。RealSense 有出厂内参，可以跳过这一步。
    ```bash
    ./station.sh exec station ros2 run camera_calibration cameracalibrator --size 8x6 --square 0.025 \
@@ -183,7 +185,7 @@ Quest 浏览器打开 `chrome://flags`，在 "Insecure origins treated as secure
    - 结果不好：看 `the sample furthest off` 是哪一张，用 `d` 删掉最后一个样本，或者事后用 `solve --drop 007.jpg --write` 重新求解。样本都存在 `data/calibration/<相机>-<时间>/` 里。
 5. **标定第三视角相机**：标定板固定在手上，相机不动。
    ```bash
-   ./station.sh exec station python3 -m robot_station.calibrate run --camera front --mode base --square 0.05 --marker 0.037
+   ./station.sh exec station python3 -m robot_station.calibrate run --camera front --mode base --squares 6x4 --square 0.045 --marker 0.034
    ```
    步骤同上，让手带着标定板在相机前面转。
 6. **重启 station**，在 rviz 里检查：`RVIZ=true` 启动，加上 TF 显示，相机坐标系应该在实际安装的位置。也可以把夹爪尖碰到桌上一个点，看相机图像里的位置对不对。

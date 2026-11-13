@@ -4,7 +4,7 @@ robot_state_publisher, /franka), the camera's image and intrinsics from its
 topics (cameras.yaml: /cameras/<name>/color/...), the result to
 calibration.yaml, which the station publishes as static transforms.
 
-    python3 -m robot_station.calibrate board --out board.png             print this (then measure it)
+    python3 -m robot_station.calibrate board --out board.pdf             print this (an A4 page; then measure it)
     python3 -m robot_station.calibrate run --camera wrist --mode hand    the wrist camera (board on the table)
     python3 -m robot_station.calibrate run --camera front --mode base    a camera that stays (board on the hand)
     python3 -m robot_station.calibrate solve data/calibration/<dir>      solve saved samples again
@@ -71,24 +71,93 @@ def add_board_args(p):
   g = p.add_argument_group('the board (as printed: measure it)')
   g.add_argument('--squares', default='7x5', help='squares across x down (default 7x5)')
   g.add_argument('--square', type=float, default=0.035,
-                 help='m: a square\'s side, measured on the print (default 0.035: A4; 0.05 with --marker 0.037 for A3)')
+                 help='m: a square\'s side, measured on the print (default 0.035: 7x5 on A4; 6x4 at 0.045, --marker 0.034 for a far camera)')
   g.add_argument('--marker', type=float, default=0.026, help='m: a marker\'s side, measured on the print')
   g.add_argument('--dict', default='5X5_100', help='ArUco dictionary (default 5X5_100)')
 
 
 # ---- board ----
 
+A4 = (0.297, 0.210)  # m, landscape
+
+
 def make_board(a):
   board = cal.Board.from_args(a)
   px_per_m = a.dpi / 0.0254
-  margin = int(round(a.margin * px_per_m))
-  img = board.image(px_per_m, margin)
-  cv2.imwrite(a.out, img)
   w, h = board.squares_x * board.square, board.squares_y * board.square
-  print(f'{a.out}: {img.shape[1]}x{img.shape[0]} px at {a.dpi} dpi: the board {w * 100:.1f} x {h * 100:.1f} cm '
-        f'(+{a.margin * 100:.1f} cm white around), squares {board.square * 100:.1f} cm, markers {board.marker * 100:.1f} cm')
-  print('print it at 100 % (no "fit to page"), stick it flat on something rigid, measure a square and a '
-        'marker and pass them: --square, --marker (m)')
+  if a.out.lower().endswith('.pdf'):
+    img = a4_page(board, px_per_m)
+    write_pdf(a.out, img, A4)
+    print(f'{a.out}: an A4 page (landscape), the board {w * 100:.1f} x {h * 100:.1f} cm, squares '
+          f'{board.square * 100:.1f} cm, markers {board.marker * 100:.1f} cm, a 10 cm ruler to check the print')
+  else:
+    margin = int(round(a.margin * px_per_m))
+    img = board.image(px_per_m, margin)
+    cv2.imwrite(a.out, img)
+    print(f'{a.out}: {img.shape[1]}x{img.shape[0]} px at {a.dpi} dpi: the board {w * 100:.1f} x {h * 100:.1f} cm '
+          f'(+{a.margin * 100:.1f} cm white around), squares {board.square * 100:.1f} cm, markers {board.marker * 100:.1f} cm')
+  print('print it at 100 % / actual size (no "fit to page"), stick it flat on something rigid, measure a square '
+        'and a marker and pass them: --square, --marker (m)')
+
+
+def a4_page(board, px_per_m):
+  """The board on an A4 page (landscape, white), its parameters and a 10 cm ruler under it."""
+  W, H = (int(round(v * px_per_m)) for v in A4)
+  page = np.full((H, W), 255, np.uint8)
+  img = board.image(px_per_m)
+  bh, bw = img.shape
+  mm = px_per_m / 1000
+  block = bh + int(17 * mm)  # the board, the ruler and a line of text under it
+  if bw > W - 10 * mm or block > H - 10 * mm:  # (printers leave about 5 mm at each edge)
+    raise ValueError(f'the board ({bw / px_per_m * 100:.1f} x {bh / px_per_m * 100:.1f} cm) does not fit an A4 page '
+                     'with its margins: smaller squares, or fewer')
+  x0, y0 = (W - bw) // 2, (H - block) // 2
+  page[y0:y0 + bh, x0:x0 + bw] = img
+  line = max(1, int(0.3 * mm))
+  font, thick = cv2.FONT_HERSHEY_SIMPLEX, max(1, int(0.25 * mm))
+  ruler_y = y0 + bh + int(6 * mm)
+  x1 = x0 + int(round(100 * mm))
+  cv2.line(page, (x0, ruler_y), (x1, ruler_y), 0, line)
+  for i in range(11):
+    x = x0 + int(round(i * 10 * mm))
+    cv2.line(page, (x, ruler_y - int((3 if i % 5 else 5) * mm)), (x, ruler_y), 0, line)
+  scale = 2.0 * mm / 10
+  cv2.putText(page, '10 cm', (x1 + int(2 * mm), ruler_y), font, scale, 0, thick, cv2.LINE_AA)
+  text = (f'ChArUco {board.squares_x}x{board.squares_y}, square {board.square * 1000:.0f} mm, marker '
+          f'{board.marker * 1000:.0f} mm, DICT_{board.dictionary}. Print at 100 % (actual size); '
+          f'check the ruler, measure, pass --square --marker')
+  (tw, _), _ = cv2.getTextSize(text, font, scale, thick)
+  scale *= min(1.0, bw / tw)
+  cv2.putText(page, text, (x0, ruler_y + int(7 * mm)), font, scale, 0, thick, cv2.LINE_AA)
+  return page
+
+
+def write_pdf(path, gray, size_m):
+  """A one page PDF: the grayscale image over the whole page (size_m: its size in m), lossless."""
+  import zlib
+  h, w = gray.shape
+  pw, ph = (v / 0.0254 * 72 for v in size_m)  # points
+  data = zlib.compress(np.ascontiguousarray(gray).tobytes(), 9)
+  content = f'q {pw:.3f} 0 0 {ph:.3f} 0 0 cm /Im0 Do Q'.encode()
+  objects = [
+      b'<< /Type /Catalog /Pages 2 0 R >>',
+      b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {pw:.3f} {ph:.3f}] /Resources << /XObject << /Im0 5 0 R >> >> '
+      f'/Contents 4 0 R >>'.encode(),
+      b'<< /Length %d >>\nstream\n' % len(content) + content + b'\nendstream',
+      f'<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceGray /BitsPerComponent 8 '
+      f'/Interpolate false /Filter /FlateDecode /Length {len(data)} >>\nstream\n'.encode() + data + b'\nendstream',
+  ]
+  out = bytearray(b'%PDF-1.4\n')
+  offsets = []
+  for i, body in enumerate(objects, 1):
+    offsets.append(len(out))
+    out += f'{i} 0 obj\n'.encode() + body + b'\nendobj\n'
+  xref = len(out)
+  out += f'xref\n0 {len(objects) + 1}\n0000000000 65535 f \n'.encode()
+  out += b''.join(f'{o:010d} 00000 n \n'.encode() for o in offsets)
+  out += f'trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n'.encode()
+  Path(path).write_bytes(bytes(out))
 
 
 # ---- samples on disk ----
