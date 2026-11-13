@@ -1,13 +1,12 @@
-"""What every real robot looks like to the bridge: a RobotSpec (its joints as
-the lobby names them, their limits, its gripper) and a RobotDriver (connect,
-read, command, stop). A new robot is one module in this package with both,
-registered in drivers/__init__.py; the bridge, the safety layer and the
-lobby side stay as they are.
+"""What every robot looks like to the follower and hw.py: a RobotSpec (its
+joints as the lobby names them, their limits, its gripper) and a RobotDriver
+(connect, read, command, hold, recover). The drivers are ROS clients of the
+robot's ros2_control (drivers/franka.py): nothing here talks to hardware.
 
 Units are the lobby's: joint positions in rad (m for a slide), the gripper
 as the lobby's finger joint reports it (spec.gripper: which joint, its open
 and closed values). A driver turns them into its robot's own (the Panda's
-gripper width, the SO-101's servo ticks).
+hand width).
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ class RobotSpec:
   joints: list[str]       # the arm's joints, in the driver's order, named as the lobby names them
   lower: list[float]      # joint limits (rad), the real robot's
   upper: list[float]
-  max_vel: list[float]    # rad/s the bridge never commands beyond
+  max_vel: list[float]    # rad/s the station never commands beyond
   gripper: GripperSpec | None = None
   limit_margin: float = 0.02      # rad kept clear of each limit
   start_tolerance: float = 0.15   # rad: the lobby's target this near the real robot to enable
@@ -77,10 +76,10 @@ class RobotState:
 
 
 class RobotDriver(abc.ABC):
-  """One real robot. The bridge calls these from its control thread only:
-  a driver needs no locking of its own. command() is called at the bridge's
-  rate with targets already filtered by the safety layer (in limits, near
-  the robot, velocity limited); it should not block for long."""
+  """One robot. The follower and hw.py call these from their control thread
+  only. command() is called at their rate with targets already filtered by
+  the safety layer (in limits, near the robot, velocity limited); it should
+  not block for long."""
 
   spec: RobotSpec
 
@@ -90,7 +89,7 @@ class RobotDriver(abc.ABC):
 
   @abc.abstractmethod
   def connect(self):
-    """Opens the connection; raises if the robot cannot be reached."""
+    """Subscribes and connects to the robot's controllers."""
 
   @abc.abstractmethod
   def read(self) -> RobotState:
@@ -111,4 +110,4 @@ class RobotDriver(abc.ABC):
     """Clears a fault the robot reports, before enabling again."""
 
   def close(self):
-    """Lets go of the robot (the bridge exits)."""
+    """Lets go of the robot (the node exits)."""

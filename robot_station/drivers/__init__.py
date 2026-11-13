@@ -1,10 +1,12 @@
-"""The robots the bridge knows: per robot its spec and its real driver (a
-module and class, imported only when used: franky or a serial SDK need not
-be installed to run another robot or the fake one).
+"""The robots the station knows: per robot its spec (drivers/base.py: the
+joints as the lobby names them, limits, the gripper) and the ROS client of
+its ros2_control (the hardware is franka_ros2's: launch/robot.launch.py).
 
-A new robot: a module here with a RobotSpec and a RobotDriver subclass
-(drivers/base.py), one line below, and the lobby's profile for its model
-(robot-lobby's public/json/ros_profiles.json, keyed by spec.lobby_key)."""
+A new robot: its ros2_control bringup, a module here with its RobotSpec, a
+RobotDriver for its controllers (or FrankaRos's pattern: a trajectory
+controller and gripper actions), one line below, and the lobby's profile for
+its model (robot-lobby's public/json/ros_profiles.json, keyed by
+spec.lobby_key)."""
 
 from __future__ import annotations
 
@@ -13,22 +15,17 @@ import importlib
 from .base import GripperSpec, RobotDriver, RobotSpec, RobotState  # noqa: F401
 
 ROBOTS = {
-    # name: (module, spec, driver class)
-    'panda': ('panda', 'PANDA', 'PandaDriver'),
-    'so101': ('so101', 'SO101', 'SO101Driver'),
+    # name: (spec module, spec, driver module, driver class)
+    'panda': ('panda', 'PANDA', 'franka', 'FrankaRos'),
 }
 
 
 def spec(name) -> RobotSpec:
-  mod, sp, _ = ROBOTS[name]
+  mod, sp, _, _ = ROBOTS[name]
   return getattr(importlib.import_module(f'.{mod}', __name__), sp)
 
 
-def driver(name, kind='real', **options) -> RobotDriver:
-  """Robot `name`'s driver: its real one, or kind 'fake' (drivers/fake.py)."""
-  if kind == 'fake':
-    from .fake import FakeDriver
-    return FakeDriver(spec(name), **options)
-  mod, sp, cls = ROBOTS[name]
-  m = importlib.import_module(f'.{mod}', __name__)
-  return getattr(m, cls)(getattr(m, sp), **options)
+def driver(name, node, **options) -> RobotDriver:
+  """Robot `name`'s driver: a ROS client (on `node`) of its ros2_control."""
+  _, _, mod, cls = ROBOTS[name]
+  return getattr(importlib.import_module(f'.{mod}', __name__), cls)(spec(name), node=node, **options)

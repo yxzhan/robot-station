@@ -5,8 +5,8 @@
 #   pip install -e .                  (this checkout, editable)
 #
 # Not listed: rclpy and the ROS messages (the ROS python: /usr/bin/python3 with
-# ROS 2 sourced; pip there needs --user --break-system-packages), franky (the
-# Panda: a libfranka 0.9.2 wheel, docker/Dockerfile), ros2 bag (recording).
+# ROS 2 sourced; pip there needs --user --break-system-packages), franka_msgs
+# (the franka workspace, docker/Dockerfile), ros2 bag (recording).
 
 [build-system]
 requires = ["setuptools>=64"]
@@ -15,7 +15,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "robot-station"
 version = "0.1.0"
-description = "A real robot (Franka Panda) as a ROS 2 system: following robot-lobby over rosbridge, ros2_control hardware for giskard, recording, a web page"
+description = "A real robot (Franka Panda under franka_ros2) as a ROS 2 system: following robot-lobby over rosbridge, a front end for giskard, recording, a web page"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["aiohttp", "pyyaml"]

@@ -1,6 +1,7 @@
 """python3 -m robot_station.follower --robot panda [--driver real|fake] ...
 
-A real robot following robot-lobby's robot: the lobby connects to this ROS
+A real robot following robot-lobby's robot (its ros2_control's client:
+drivers/franka.py; the hardware is launch/robot.launch.py's): the lobby connects to this ROS
 through rosbridge_server (its ROS panel's Bridge) and publishes the robot's
 joint states, the target; its Real robot section (public/js/ros/real.js)
 shows the real robot as a ghost and enables it. Topics, under --ns (the
@@ -20,8 +21,10 @@ lobby robot's prefix, its ROS profile's: /panda):
                                (open / closed): the action, for recording
 
 The control loop runs on a thread of its own at --rate Hz: it reads the
-robot, runs the safety layer (safety.py: limits, speed, start tolerance,
-timeouts, falling behind) on the latest target and sends the command.
+robot (its joint states), runs the safety layer (safety.py: limits, speed,
+start tolerance, timeouts, falling behind) on the latest target and sends the
+command (a short trajectory to joint_trajectory_controller; the hand a Grasp
+or Move action).
 Enabled with no lobby publishing the target for LOBBY_GONE_S: disabled.
 """
 
@@ -46,18 +49,14 @@ LOBBY_GONE_S = 1.0  # enabled, no publisher of the target this long: disabled
 
 
 def driver_options(a):
-  return {
-      'real': {'ip': a.ip, 'dynamics': a.dynamics, 'grasp_force': a.grasp_force,
-               'controller': a.controller, 'stiffness': a.stiffness}
-      if a.robot == 'panda' else {'port': a.serial, 'calibration': a.calibration},
-      'fake': {'lag': a.lag},
-  }[a.driver]
+  return {'ns': a.hw_ns, 'controller': a.controller, 'lookahead': a.lookahead, 'grasp_force': a.grasp_force,
+          'gripper_speed': a.gripper_speed}
 
 
 class Follower(Node):
   def __init__(self, a):
     super().__init__(f'{a.robot}_follower')
-    self.driver = drivers.driver(a.robot, a.driver, **driver_options(a))
+    self.driver = drivers.driver(a.robot, self, **driver_options(a))
     self.spec, self.driver_name = self.driver.spec, a.driver
     ns = '/' + (a.ns if a.ns is not None else self.spec.name).strip('/')
     self.topics = {k: f'{ns}/{t}'.replace('//', '/') for k, t in
@@ -78,6 +77,7 @@ class Follower(Node):
     self.pub_command = self.create_publisher(JointState, self.topics['command'], 10)
     self.create_subscription(JointState, self.topics['target'], self.on_target, 10)
     self.create_subscription(Bool, self.topics['enable'], self.on_enable, 10)
+    self.driver.connect()
 
   # ---- from the executor ----
 
@@ -99,8 +99,7 @@ class Follower(Node):
   # ---- the control thread ----
 
   def run(self):
-    self.driver.connect()
-    self.get_logger().info(f'{self.spec.name} ({self.driver_name}) connected; topics {", ".join(self.topics.values())}')
+    self.get_logger().info(f'{self.spec.name} ({self.driver_name}); topics {", ".join(self.topics.values())}')
     dt = 1.0 / self.rate
     next_t = time.monotonic()
     last_state = last_status = 0.0
@@ -140,7 +139,7 @@ class Follower(Node):
         elif not holding:
           self.driver.hold()
           holding = True
-        if now - last_state >= 1.0 / self.state_rate:
+        if now - last_state >= 1.0 / self.state_rate and real.finite():
           self.publish_state(real)
           last_state = now
         status = self.status_msg(step.stale, lobby)
@@ -196,17 +195,14 @@ class Follower(Node):
 
 def add_driver_args(p):
   p.add_argument('--robot', default='panda', choices=sorted(drivers.ROBOTS))
-  p.add_argument('--driver', default='real', choices=['real', 'fake'])
+  p.add_argument('--driver', default='real', choices=['real', 'fake'], help='what ros2_control runs (for the status)')
   p.add_argument('--speed', type=float, default=0.5, help='fraction of the joints\' max speeds commanded at most')
   p.add_argument('--timeout', type=float, default=0.3, help='s without targets before the robot holds')
-  p.add_argument('--ip', default='172.16.0.2', help='Panda: the robot\'s address (FCI)')
-  p.add_argument('--dynamics', type=float, default=0.15, help='Panda, position controller: franky\'s relative_dynamics_factor')
-  p.add_argument('--controller', default='impedance', choices=['impedance', 'position'], help='Panda: torque (joint impedance) or position control')
-  p.add_argument('--stiffness', type=float, default=1.0, help='Panda, impedance controller: its joint stiffness scaled by this')
+  p.add_argument('--hw-ns', default='/franka', help='the robot\'s ros2_control (launch/robot.launch.py)')
+  p.add_argument('--controller', default='', help='the arm\'s trajectory controller (default <hw-ns>/joint_trajectory_controller)')
+  p.add_argument('--lookahead', type=float, default=0.05, help='s: each command a trajectory point reached in this long')
   p.add_argument('--grasp-force', type=float, default=20.0, help='Panda: N')
-  p.add_argument('--serial', default='/dev/ttyACM0', help='SO-101: the servo bus')
-  p.add_argument('--calibration', help='SO-101: calibration file')
-  p.add_argument('--lag', type=float, default=0.0, help='fake: s its states lag behind')
+  p.add_argument('--gripper-speed', type=float, default=0.05, help='Panda: m/s')
 
 
 def main():

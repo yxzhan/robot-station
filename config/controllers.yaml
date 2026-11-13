@@ -1,0 +1,42 @@
+# ros2_control of the Panda (franka_ros2, launch/robot.launch.py). The arm is
+# position commanded through joint_trajectory_controller: the station's
+# follower (the lobby's teleop) and hw.py (giskard) stream short trajectories
+# to its ~/joint_trajectory topic, scripts can send it FollowJointTrajectory
+# goals (~/follow_joint_trajectory). It interpolates at the update rate, so
+# the robot gets a smooth 1 kHz position stream (the hardware interface's
+# rate limiter and low pass filter on top).
+/**/controller_manager:
+  ros__parameters:
+    update_rate: 1000  # Hz (libfranka's)
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    franka_robot_state_broadcaster:
+      type: franka_robot_state_broadcaster/FrankaRobotStateBroadcaster
+
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+/**/joint_state_broadcaster:
+  ros__parameters:
+    update_rate: 200   # /franka/arm_joint_states (not at 1 kHz)
+
+/**/franka_robot_state_broadcaster:
+  ros__parameters:
+    arm_id: fer
+    update_rate: 50
+
+/**/joint_trajectory_controller:
+  ros__parameters:
+    joints: [fer_joint1, fer_joint2, fer_joint3, fer_joint4, fer_joint5, fer_joint6, fer_joint7]
+    command_interfaces: [position]
+    state_interfaces: [position, velocity]
+    state_publish_rate: 50.0
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+    # A streamed point replaces the running trajectory; it need not end at rest.
+    allow_nonzero_velocity_at_trajectory_end: true
+    constraints:
+      stopped_velocity_tolerance: 0.0
+      goal_time: 0.0

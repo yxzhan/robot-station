@@ -1,18 +1,31 @@
 # Robot Station
 
-A real robot (a Franka Emika Panda on Panda System 4.2.x; an SO-101 next) as a ROS 2 system of
+A real robot (a Franka Emika Panda on Panda System 4.2.x) as a ROS 2 system of
 its own, teleoperated from [robot-lobby](https://github.com/yxzhan/robot-lobby) and recording
 demonstrations, with a web page to run it. The lobby and the station share nothing but
 ROS topics through `rosbridge_server`.
 
 ```
 robot-lobby (Quest / PC browser) ── rosbridge ──►  this computer (ROS 2 Jazzy, in Docker)
-  /panda/joint_states (target)  ─────────────────►  follower ── safety ── driver ── Panda (franky)
-  /panda/real/joint_states, status  ◄─────────────     │
-  /panda/real/enable  ───────────────────────────►     └─► /panda/real/command (the action)
+  /panda/joint_states (target)  ─────────────────►  follower ── safety ──┐
+  /panda/real/joint_states, status  ◄─────────────     │                 │ trajectories, Grasp / Move actions
+  /panda/real/enable  ───────────────────────────►     │                 ▼
+                                                       │      /franka: ros2_control (franka_ros2) ── Panda (FCI)
+giskard (topic_based_ros2_control) ── /panda/hw/... ── hw.py ── safety ──┘   joint_trajectory_controller,
+                                                       │                     fer_gripper, state broadcasters
+                                                       └─► /panda/real/command (the action)
                                                      web page :8080 ── recorder (rosbag2, mcap) ──► data/episodes/
                                        cameras (cameras.yaml) ── /cameras/<name>/color/image_raw/compressed ──┘
 ```
+
+The hardware layer is [franka_ros2](https://github.com/unisa-acg/franka_ros2) (unisa-acg's fork
+for the FER, i.e. the Panda on Panda System 4.2.x, on their libfranka backport) under ros2_control,
+all under `/franka` (`launch/robot.launch.py`). Nothing else talks to the robot: the lobby's
+teleop (`follower.py`) and giskard's front end (`hw.py`) are ROS clients of it, through the same
+safety layer, and so is anything else (`/franka/joint_trajectory_controller/follow_joint_trajectory`,
+`/franka/fer_gripper/{grasp,move,homing,gripper_action}`). `driver:=fake` runs ros2_control's mock
+hardware and a fake hand (`robot_station/fake_gripper.py`) instead: the same controllers and
+topics, no robot.
 
 The step-by-step procedure on the real Panda (both the lobby teleop with recording and the
 giskard demo): [docs/TESTING_zh.md](docs/TESTING_zh.md).
@@ -24,7 +37,11 @@ On the robot's computer (a PREEMPT_RT kernel, Docker with compose):
 ```bash
 ./station.sh up --build                                   # a fake robot: try everything without hardware
 DRIVER=real ROBOT_IP=172.16.0.2 SPEED=0.3 ./station.sh up  # the Panda (FCI active in Desk, E-stop at hand)
+DRIVER=real RVIZ=true ./station.sh up                     # with rviz2: the robot, /tf
 ```
+
+The image builds the franka workspace (`/opt/franka_ws`: the libfranka backport, franka_ros2,
+franka_description, each pinned to a commit in `docker/Dockerfile`); the first build takes a while.
 
 `station.sh` is `docker compose` with your user's ids, so the episodes in `./data` are yours.
 The repository is mounted into the container at `/repo`: the code runs as it is here, no rebuild
@@ -40,19 +57,45 @@ this computer's display (`station.sh` runs `xhost +local:`):
 
 | variable | default | |
 |---|---|---|
-| `DRIVER` | `fake` | `real` or `fake` |
+| `DRIVER` | `fake` | `real` (franka_ros2's hardware interface) or `fake` (ros2_control's mock hardware) |
 | `ROBOT` / `ROBOT_IP` | `panda` / `172.16.0.2` | the robot, the Panda's FCI address |
+| `FOLLOWER` | `true` | the lobby's teleop; `false` when another client (giskard's `hw.py`) commands the arm |
+| `RVIZ` | `false` | rviz2 (`config/station.rviz`) |
 | `SPEED` | `0.5` | fraction of the joints' max speeds commanded at most |
-| `CONTROLLER` | `impedance` | Panda: `impedance` (torque control, joint impedance tracking: tolerates lost packets) or `position` (franky's JointMotions) |
-| `STIFFNESS` | `1.0` | Panda, impedance: its joint stiffness scaled by this (softer below 1) |
-| `DYNAMICS` / `GRASP_FORCE` | `0.15` / `20` | Panda, position: franky's relative_dynamics_factor; N |
+| `LOOKAHEAD` | `0.05` | s: each command a trajectory point the controller reaches in this long |
+| `GRASP_FORCE` | `20` | N |
 | `ROSBRIDGE_PORT` / `WEB_PORT` | `9090` / `8080` | the lobby's Bridge, the station's page |
 | `ROS_DOMAIN_ID` | `0` | |
 
 Without Docker (ROS 2 Jazzy, `python3-aiohttp`, `ros-jazzy-rosbridge-suite`,
-`ros-jazzy-rosbag2-storage-mcap`, franky for the real Panda; for cameras
-`ros-jazzy-realsense2-camera`, `ros-jazzy-usb-cam`, `ros-jazzy-image-transport-plugins`, `python3-opencv`):
+`ros-jazzy-rosbag2-storage-mcap`, `ros-jazzy-ros2-control`, `ros-jazzy-ros2-controllers`, the franka
+workspace built as in `docker/Dockerfile` and sourced; for cameras `ros-jazzy-realsense2-camera`,
+`ros-jazzy-usb-cam`, `ros-jazzy-image-transport-plugins`, `python3-opencv`):
 `ros2 launch launch/station.launch.py driver:=fake`.
+
+## The hardware layer
+
+`launch/robot.launch.py` (included by the station; `hardware:=false` leaves it out), all under `/franka`:
+
+| | |
+|---|---|
+| `controller_manager` | `FrankaAsyncHardwareInterface` (or mock hardware), 1 kHz, `config/controllers.yaml` |
+| `joint_trajectory_controller` | the arm (position interface): `~/joint_trajectory` (the follower and `hw.py` stream one point trajectories, each replacing the last), `~/follow_joint_trajectory` |
+| `joint_state_broadcaster` | `/franka/arm_joint_states` (200 Hz: q, dq, tau) |
+| `franka_robot_state_broadcaster` | `~/robot_state` (errors, robot mode: the station's faults), poses, wrenches (real only) |
+| `action_server` | `~/error_recovery` (the station's Enable after a fault calls it) |
+| `fer_gripper` | `franka_gripper_node`: `~/grasp`, `~/move`, `~/homing`, `~/gripper_action`, `~/joint_states` |
+| `robot_state_publisher` | `/franka/robot_description` (franka_description's `fer` with the hand), `/tf` from `/franka/joint_states` |
+
+The hardware interface's rate limiter and low pass filter on position commands, and its position
+gain, are the launch file's `rate_limit`, `low_pass`, `gain`.
+
+```bash
+./station.sh exec station ros2 control list_controllers -c /franka/controller_manager
+./station.sh exec station ros2 topic echo /franka/franka_robot_state_broadcaster/robot_state --field robot_mode
+./station.sh exec station ros2 action send_goal /franka/fer_gripper/homing franka_msgs/action/Homing {}
+./station.sh exec station ros2 action send_goal /franka/action_server/error_recovery franka_msgs/action/ErrorRecovery {}
+```
 
 ## Cameras
 
@@ -124,45 +167,46 @@ JSON `{"op": "start", "task": "..."}`, `{"op": "stop"}`, `{"op": "discard"}`),
 
 ## giskardpy
 
-`python3 -m robot_station.hw` is the same robot as ros2_control's hardware
-(`topic_based_ros2_control`, velocity commanded arm, gripper action): ijcai_2026_workshop's
-`demo/panda_giskard`. It and the follower both drive the robot's FCI: one at a time.
-
-## Debugging the Panda
-
-```bash
-./station.sh run --rm station python3 -m robot_station.debug_panda --ip 172.16.0.2 info   # read only
-./station.sh run --rm station python3 -m robot_station.debug_panda --ip 172.16.0.2 gripper
-```
-
-checks franky's versions, the robot's state, the hand (homing, open, close: return values and
-exceptions printed), the driver's hand thread; see its docstring.
+`python3 -m robot_station.hw` is the robot as giskard's ros2_control hardware
+(`topic_based_ros2_control`, velocity commanded arm on `/panda/hw/joint_commands`, gripper action
+`/panda/hw/gripper_cmd`): ijcai_2026_workshop's `demo/panda_giskard`. It integrates the velocities
+into positions streamed to the station's `/franka/joint_trajectory_controller`, its gripper goals
+become the hand's Grasp / Move: the station must run (`FOLLOWER=false ./station.sh up`, `DRIVER=fake`
+too), and it and the follower both command the arm: one at a time. Its old `--ip` and `--dynamics`
+are accepted and ignored.
 
 ## Tests
 
 ```bash
 ros2 launch launch/station.launch.py driver:=fake &      # (or ./station.sh up)
 python3 tests/smoke.py                                    # (or ./station.sh exec station python3 tests/smoke.py)
+python3 tests/smoke_hw.py
 ```
 
-stands in for the lobby: publishes the target, enables, moves the robot, records an episode over
-ROS and checks the bag (with cameras, also their images: try a `cameras.yaml` of `fake` ones).
+`smoke.py` stands in for the lobby: publishes the target, enables, moves the arm, closes and opens
+the hand, records an episode over ROS and checks the bag (with cameras, also their images: try a
+`cameras.yaml` of `fake` ones). `smoke_hw.py` runs `hw.py` and stands in for giskard: velocities in,
+the arm moved, the gripper action. Both through ros2_control's mock hardware.
 
 ## Layout
 
 ```
 robot_station/follower.py   the real robot following the lobby (ROS node, control thread)
-robot_station/hw.py         the same as ros2_control hardware (giskard)
+robot_station/hw.py         the same as giskard's ros2_control hardware
 robot_station/safety.py     limits, speed, start tolerance, timeouts, falling behind
-robot_station/drivers/      per robot: spec and driver (panda: franky; fake; so101: to do)
+robot_station/drivers/      per robot: its spec (panda.py) and the client of its ros2_control (franka.py)
+robot_station/fake_gripper.py  franka_gripper_node's stand-in (driver:=fake)
 robot_station/recorder.py   episodes: ros2 bag record, meta.json
 robot_station/cameras.py    cameras.yaml: the camera nodes, their topics; what is connected
 robot_station/fake_camera.py  a test pattern camera
 robot_station/web.py        the page's server (aiohttp) and its ROS node
 robot_station/static/       the page
-launch/               rosbridge + follower + page + cameras
+launch/station.launch.py    the hardware layer + rosbridge + follower + page + cameras
+launch/robot.launch.py      the hardware layer: franka_ros2 under ros2_control (/franka)
+config/                     controllers.yaml (ros2_control), station.rviz
 docker/, docker-compose.yml, station.sh
 ```
 
-The drivers, the safety layer, `hw.py` and `debug_panda.py` came from robot-lobby's `real_robot/`
-(2026-11), which this repository replaces.
+The safety layer and `hw.py` came from robot-lobby's `real_robot/` (2026-11), which this repository
+replaces. Before ros2_control, the station drove the Panda itself with franky (its `drivers/panda.py`,
+`debug_panda.py`: in the history).

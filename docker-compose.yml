@@ -34,6 +34,6 @@ services:
     command: >
       ros2 launch launch/station.launch.py
       robot:=${ROBOT:-panda} driver:=${DRIVER:-fake} ip:=${ROBOT_IP:-172.16.0.2}
-      speed:=${SPEED:-0.5} dynamics:=${DYNAMICS:-0.15} grasp_force:=${GRASP_FORCE:-20}
-      controller:=${CONTROLLER:-impedance} stiffness:=${STIFFNESS:-1.0}
+      follower:=${FOLLOWER:-true} rviz:=${RVIZ:-false}
+      speed:=${SPEED:-0.5} lookahead:=${LOOKAHEAD:-0.05} grasp_force:=${GRASP_FORCE:-20}
       rosbridge_port:=${ROSBRIDGE_PORT:-9090} web_port:=${WEB_PORT:-8080} data:=/repo/data

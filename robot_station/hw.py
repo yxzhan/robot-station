@@ -4,10 +4,12 @@ The ROS 2 front end: a robot as the hardware of ros2_control's
 topic_based_ros2_control, its arm velocity commanded (forward_velocity_
 controller; giskardpy's universal_robot_velocity drives it), its gripper an
 action (giskardpy, ijcai_2026_workshop's demo/panda_giskard). The same
-drivers and safety layer as the follower (follower.py: the lobby's teleop),
-with one more driver here: `lobby`, the lobby's robot over rosbridge (a
-digital twin to try a program on first). The follower and this drive the
-robot's FCI: one at a time.
+driver and safety layer as the follower (follower.py: the lobby's teleop): a
+client of the robot's own ros2_control (launch/robot.launch.py, franka_ros2;
+--driver real | fake: what it runs), the velocities integrated into the
+positions streamed to its joint_trajectory_controller. One more driver here:
+`lobby`, the lobby's robot over rosbridge (a digital twin to try a program
+on first). The follower and this both command the arm: run one of them.
 
 Topics, under --ns (/<robot>/hw):
 
@@ -113,15 +115,11 @@ class Ros2Front(Node):
     super().__init__(f'{a.robot}_hw')
     self.a = a
     self.ns = (a.ns or f'/{a.robot}/hw').rstrip('/')
-    opts = {'fake': {'lag': a.lag},
-            'lobby': {'node': self, 'states': a.lobby_states, 'commands': a.lobby_commands},
-            'panda': {'ip': a.ip, 'dynamics': a.dynamics, 'grasp_force': a.grasp_force,
-                      'controller': a.controller, 'stiffness': a.stiffness},
-            'so101': {'port': a.serial, 'calibration': a.calibration}}
     if a.driver == 'lobby':
-      self.driver = LobbyDriver(drivers.spec(a.robot), **opts['lobby'])
+      self.driver = LobbyDriver(drivers.spec(a.robot), node=self, states=a.lobby_states, commands=a.lobby_commands)
     else:
-      self.driver = drivers.driver(a.robot, a.driver, **(opts['fake'] if a.driver == 'fake' else opts.get(a.robot, {})))
+      self.driver = drivers.driver(a.robot, self, ns=a.hw_ns, controller=a.controller, lookahead=a.lookahead,
+                                   grasp_force=a.grasp_force, gripper_speed=a.gripper_speed)
     self.spec = self.driver.spec
     self.safety = Supervisor(self.spec, timeout=a.timeout, speed=a.speed)
     self.lock = threading.Lock()
@@ -254,20 +252,19 @@ class Ros2Front(Node):
 def main():
   p = argparse.ArgumentParser(prog='python3 -m robot_station.hw', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
   p.add_argument('--robot', default='panda', choices=sorted(drivers.ROBOTS))
-  p.add_argument('--driver', default='real', choices=['real', 'fake', 'lobby'])
+  p.add_argument('--driver', default='real', choices=['real', 'fake', 'lobby'], help='real | fake: what ros2_control runs (for the status); lobby: the lobby\'s robot')
   p.add_argument('--ns', help='topic namespace (default /<robot>/hw)')
   p.add_argument('--enable', action='store_true', help='enable at start (else the enable service)')
   p.add_argument('--rate', type=float, default=100.0, help='control loop, Hz')
   p.add_argument('--speed', type=float, default=0.5, help='fraction of the joints\' max speeds commanded at most')
   p.add_argument('--timeout', type=float, default=0.3, help='s without velocity commands before the robot holds')
-  p.add_argument('--ip', default='172.16.0.2', help='Panda: the robot\'s address (FCI)')
-  p.add_argument('--dynamics', type=float, default=0.15, help='Panda, position controller: franky\'s relative_dynamics_factor')
-  p.add_argument('--controller', default='impedance', choices=['impedance', 'position'], help='Panda: torque (joint impedance) or position control')
-  p.add_argument('--stiffness', type=float, default=1.0, help='Panda, impedance controller: its joint stiffness scaled by this')
+  p.add_argument('--hw-ns', default='/franka', help='the robot\'s ros2_control (launch/robot.launch.py)')
+  p.add_argument('--controller', default='', help='the arm\'s trajectory controller (default <hw-ns>/joint_trajectory_controller)')
+  p.add_argument('--lookahead', type=float, default=0.03, help='s: each command a trajectory point reached in this long')
   p.add_argument('--grasp-force', type=float, default=20.0, help='Panda: N')
-  p.add_argument('--serial', default='/dev/ttyACM0', help='SO-101: the servo bus')
-  p.add_argument('--calibration', help='SO-101: calibration file')
-  p.add_argument('--lag', type=float, default=0.0, help='fake: s its states lag behind')
+  p.add_argument('--gripper-speed', type=float, default=0.05, help='Panda: m/s')
+  p.add_argument('--ip', help='(ignored: the robot\'s address is its ros2_control\'s, launch/robot.launch.py)')
+  p.add_argument('--dynamics', help='(ignored: franky\'s, before ros2_control)')
   p.add_argument('--lobby-states', default='', help='lobby: its joint states (default /<robot>/joint_states)')
   p.add_argument('--lobby-commands', default='', help='lobby: its joint commands (default /<robot>/joint_command)')
   a = p.parse_args(rclpy.utilities.remove_ros_args()[1:])

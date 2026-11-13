@@ -1,6 +1,6 @@
 """A smoke test of a running station (fake robot), without the lobby: this
 script stands in for it, publishing the target, enabling the robot, moving it
-and recording an episode over ROS (/station/record/cmd), then checks that the
+(the arm, then the hand closed and opened) and recording an episode over ROS (/station/record/cmd), then checks that the
 robot followed and that the episode's bag holds the motion (and the
 cameras' images, if there are cameras).
 
@@ -40,11 +40,11 @@ def main():
   pub_enable = node.create_publisher(Bool, f'{a.ns}/real/enable', 10)
   pub_record = node.create_publisher(String, '/station/record/cmd', 10)
 
-  def spin(seconds, target=None):
+  def spin(seconds, target=None, finger=0.04):
     t0 = time.monotonic()
     while time.monotonic() - t0 < seconds:
       if target is not None:
-        pub_target.publish(JointState(name=ARM + ['finger_joint1'], position=list(target) + [0.04]))
+        pub_target.publish(JointState(name=ARM + ['finger_joint1'], position=list(target) + [finger]))
       rclpy.spin_once(node, timeout_sec=0.02)
 
   def check(ok, what):
@@ -68,7 +68,11 @@ def main():
   q1[3] -= 0.2
   spin(3.0, q1)
   check(abs(real['joint4'] - q1[3]) < 0.02, f'followed: joint4 {real["joint4"]:.3f} (target {q1[3]:.3f})')
-  spin(1.0, q0)
+  spin(1.0, q0, finger=0.0)  # (closes the hand: a grasp)
+  spin(1.0, q0, finger=0.0)
+  check(real.get('finger_joint1', 1) < 0.005, f'the hand closed: finger_joint1 {real.get("finger_joint1")}')
+  spin(1.5, q0)
+  check(real.get('finger_joint1', 0) > 0.035, f'the hand opened: finger_joint1 {real.get("finger_joint1")}')
   pub_record.publish(String(data=json.dumps({'op': 'stop'})))
   spin(2.0, q0)
   check(not rec.get('recording') and not rec.get('error'), f'stopped ({rec.get("error") or "no error"})')
@@ -77,7 +81,7 @@ def main():
 
   ep = Path(a.data) / 'episodes' / eid
   meta = json.loads((ep / 'meta.json').read_text())
-  check(meta['task'] == 'smoke test' and meta['duration'] > 3, f'meta.json: task {meta["task"]!r}, {meta["duration"]} s')
+  check(meta['task'] == 'smoke test' and meta['duration'] > 6, f'meta.json: task {meta["task"]!r}, {meta["duration"]} s')
   r = rosbag2_py.SequentialReader()
   r.open(rosbag2_py.StorageOptions(uri=str(ep / 'bag'), storage_id='mcap'), rosbag2_py.ConverterOptions('', ''))
   j4, counts = [], {}
