@@ -157,7 +157,7 @@ Quest 浏览器打开 `chrome://flags`，在 "Insecure origins treated as secure
 | 手腕上的 RealSense | `hand` | 固定在桌上，不动 | `fer_hand` → `wrist_link` |
 | 第三视角相机 | `base` | 固定在夹爪上（夹紧或者用支架装在手上） | `base` → 相机 |
 
-1. **打印标定板**：
+1. **打印标定板**：直接打印仓库里的 [`docs/boards/charuco_A4_7x5_35mm.pdf`](boards/charuco_A4_7x5_35mm.pdf)（7x5，方格 3.5 cm，手腕相机）和 [`docs/boards/charuco_A4_6x4_45mm.pdf`](boards/charuco_A4_6x4_45mm.pdf)（6x4，方格 4.5 cm，第三视角相机）。要别的规格就自己生成：
    ```bash
    ./station.sh run --rm station python3 -m robot_station.calibrate board --out data/board.pdf                       # A4，7x5，方格 3.5 cm（手腕相机）
    ./station.sh run --rm station python3 -m robot_station.calibrate board --squares 6x4 --square 0.045 --marker 0.034 \

@@ -128,6 +128,11 @@ publishes them as static transforms (`calibration:=`), so the cameras are in `/t
 The camera's frame is its image's (`<name>_color_optical_frame`); a RealSense has a tree of its own
 under `<name>_link` (realsense2_camera's `publish_tf`), so for it `<name>_link` is written.
 
+The boards to print, A4 pages: [`docs/boards/charuco_A4_7x5_35mm.pdf`](docs/boards/charuco_A4_7x5_35mm.pdf)
+(the default: 7x5, 35 mm squares, 26 mm markers) and
+[`docs/boards/charuco_A4_6x4_45mm.pdf`](docs/boards/charuco_A4_6x4_45mm.pdf) (6x4, 45 mm, 34 mm: a far
+camera); `calibrate board` makes others.
+
 ```bash
 ./station.sh run --rm station python3 -m robot_station.calibrate board --out data/board.pdf            # an A4 page: 7x5, 3.5 cm squares
 ./station.sh run --rm station python3 -m robot_station.calibrate board --squares 6x4 --square 0.045 --marker 0.034 --out data/board_far.pdf   # A4, bigger squares (a far camera)
