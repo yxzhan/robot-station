@@ -62,6 +62,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 #    restarts control once the robot is idle again (error recovery);
 #  - torques are sent every cycle (it skipped a packet on a jittery period);
 #  - it sleeps instead of spinning at SCHED_FIFO 99 while disabled.
+# and the hardware interface sets the collision thresholds given as its
+# parameters (collision_*: launch/robot.launch.py) before control starts.
 COPY docker/franka_hardware.patch /tmp/franka_hardware.patch
 SHELL ["/bin/bash", "-c"]
 RUN mkdir -p /opt/franka_ws/src && cd /opt/franka_ws/src \

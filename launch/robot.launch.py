@@ -34,6 +34,9 @@ builds it). Nothing of the station talks to the robot but this; the follower
 import os
 import pathlib
 import sys
+import tempfile
+
+import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -46,6 +49,11 @@ ARM_ID = 'fer'
 NS = 'franka'  # (giskard's demo runs a ros2_control of its own: /controller_manager, /robot_description)
 CONTROLLERS = str(REPO / 'config' / 'controllers.yaml')
 EFFORT = str(REPO / 'config' / 'controllers_effort.yaml')  # control:=effort, over CONTROLLERS
+# Collision thresholds (franka's usual ones): above the lower ones contact is flagged, above the
+# upper ones (these times collision:=) the robot stops with a reflex (cartesian_reflex,
+# joint_reflex). Set by the hardware interface on start: the robot keeps its last client's otherwise.
+COLLISION_TORQUE = [20.0, 20.0, 18.0, 18.0, 16.0, 14.0, 12.0]  # Nm, the joints
+COLLISION_FORCE = [20.0, 20.0, 20.0, 25.0, 25.0, 25.0]         # N, Nm: the end effector's x y z, rx ry rz
 
 
 def description(real, ip, hand, rate_limit, low_pass, gain):
@@ -62,6 +70,37 @@ def description(real, ip, hand, rate_limit, low_pass, gain):
   return urdf.replace('fake_components/GenericSystem', 'mock_components/GenericSystem')
 
 
+def with_collision(urdf, scale):
+  """The collision thresholds as the async hardware interface's parameters (docker/franka_hardware.patch)."""
+  if scale < 1.0:
+    raise ValueError(f'collision:={scale}: 1 (franka\'s) or more')
+  csv = lambda v: ', '.join(f'{x:g}' for x in v)
+  params = ''.join(f'<param name="{k}">{csv(v)}</param>' for k, v in [
+      ('collision_lower_torque', COLLISION_TORQUE), ('collision_upper_torque', [scale * x for x in COLLISION_TORQUE]),
+      ('collision_lower_force', COLLISION_FORCE), ('collision_upper_force', [scale * x for x in COLLISION_FORCE])])
+  plugin = '<plugin>franka_hardware/FrankaAsyncHardwareInterface</plugin>'
+  if plugin not in urdf:
+    raise RuntimeError('no FrankaAsyncHardwareInterface in the robot description')
+  return urdf.replace(plugin, plugin + params, 1)
+
+
+def effort_gains(scale):
+  """config/controllers_effort.yaml with its stiffness (p) times scale, its damping (d) times
+  sqrt(scale) (the same damping ratio): a file of its own."""
+  if scale == 1.0:
+    return EFFORT
+  if not 0.05 <= scale <= 1.5:
+    raise ValueError(f'stiffness:={scale}: 0.05 .. 1.5')
+  doc = yaml.safe_load(pathlib.Path(EFFORT).read_text())
+  for gains in doc['/**/joint_trajectory_controller']['ros__parameters']['gains'].values():
+    gains['p'] *= scale
+    gains['d'] *= scale ** 0.5
+  f = tempfile.NamedTemporaryFile('w', prefix='controllers_effort_', suffix='.yaml', delete=False)
+  yaml.safe_dump(doc, f)
+  f.close()
+  return f.name
+
+
 def nodes(context):
   v = lambda name: C(name).perform(context)
   real = v('driver') == 'real'
@@ -72,14 +111,18 @@ def nodes(context):
     control = 'effort' if real else 'position'
   if control not in ('effort', 'position'):
     raise ValueError(f'control:={control}: effort, position or auto')
-  print(f'[robot.launch] the arm {control} controlled')
+  if real:
+    urdf = with_collision(urdf, float(v('collision')))
+  stiffness = float(v('stiffness'))
+  print(f'[robot.launch] the arm {control} controlled' + (f', stiffness x{stiffness:g}' if control == 'effort' else '')
+        + (f', collision thresholds x{float(v("collision")):g}' if real else ''))
   spawn = lambda name, *extra: Node(package='controller_manager', executable='spawner', output='screen', namespace=NS,
                                     arguments=[name, '--controller-manager', f'/{NS}/controller_manager', *extra])
   out = [
       Node(package='robot_state_publisher', executable='robot_state_publisher', output='screen', namespace=NS,
            parameters=[{'robot_description': urdf}]),
       Node(package='controller_manager', executable='ros2_control_node', output='screen', namespace=NS,
-           parameters=[CONTROLLERS, *([EFFORT] if control == 'effort' else []), {'robot_description': urdf}],
+           parameters=[CONTROLLERS, *([effort_gains(stiffness)] if control == 'effort' else []), {'robot_description': urdf}],
            remappings=[('~/robot_description', f'/{NS}/robot_description')],
            on_exit=Shutdown()),
       spawn('joint_state_broadcaster', '--controller-ros-args', f'-r /{NS}/joint_states:=/{NS}/arm_joint_states'),
@@ -115,6 +158,9 @@ def generate_launch_description():
       ('hand', 'true', 'the Franka Hand'),
       ('control', 'auto', 'the arm: effort (torques, joint impedance: config/controllers_effort.yaml) | '
                           'position | auto: effort on the real robot, position on the mock hardware'),
+      ('stiffness', '1.0', 'control:=effort: the joint impedance\'s stiffness times this (0.5: softer against a '
+                           'constraint, e.g. a drawer; the damping kept critical)'),
+      ('collision', '3.0', 'the reflex thresholds: franka\'s usual ones (20 N, 12-20 Nm) times this (real robot)'),
       ('rate_limit', 'true', 'the hardware interface\'s rate limiter on position commands'),
       ('low_pass', 'true', 'its low pass filter on position commands'),
       ('gain', '0.001', 'its position control gain (lambda: the pull from the desired towards the commanded position)'),

@@ -60,6 +60,8 @@ this computer's display (`station.sh` runs `xhost +local:`):
 | `DRIVER` | `fake` | `real` (franka_ros2's hardware interface) or `fake` (ros2_control's mock hardware) |
 | `ROBOT` / `ROBOT_IP` | `panda` / `172.16.0.2` | the robot, the Panda's FCI address |
 | `CONTROL` | `auto` | the arm: `effort` (torques: joint impedance tracking, `config/controllers_effort.yaml`), `position` (the robot's motion generator), `auto`: effort on the real robot, position on the mock hardware |
+| `STIFFNESS` | `1.0` | effort control: the joint stiffness scaled (damping by its square root, 0.05..1.5); lower yields more to a constraint (a drawer's handle grasped off its center) |
+| `COLLISION` | `3.0` | real robot: the reflex thresholds this many times the contact ones (20 N / 25 Nm at the hand, 12..20 Nm at the joints): higher is fewer `cartesian_reflex`es, a collision stopped later |
 | `FOLLOWER` | `true` | the lobby's teleop; `false` when another client (giskard's `hw.py`) commands the arm |
 | `RVIZ` | `false` | rviz2 (`config/station.rviz`) |
 | `SPEED` | `0.1` | fraction of the joints' max speeds commanded at most |

@@ -1,6 +1,6 @@
 diff -ru a/include/franka_hardware/robot_communication_thread.hpp b/include/franka_hardware/robot_communication_thread.hpp
---- a/franka_hardware/include/franka_hardware/robot_communication_thread.hpp	2026-11-13 14:32:22.000000000 +0100
-+++ b/franka_hardware/include/franka_hardware/robot_communication_thread.hpp	2026-11-13 16:41:13.906109513 +0100
+--- a/franka_hardware/include/franka_hardware/robot_communication_thread.hpp	2026-11-16 14:00:35.756868796 +0100
++++ b/franka_hardware/include/franka_hardware/robot_communication_thread.hpp	2026-11-13 16:41:44.000000000 +0100
 @@ -1,6 +1,7 @@
  #pragma once
  
@@ -56,9 +56,105 @@ diff -ru a/include/franka_hardware/robot_communication_thread.hpp b/include/fran
  
    // Mutexes for thread safety
    std::mutex robot_state_mutex_;
+diff -ru a/src/franka_async_hardware_interface.cpp b/src/franka_async_hardware_interface.cpp
+--- a/franka_hardware/src/franka_async_hardware_interface.cpp	2026-11-16 14:00:35.753868817 +0100
++++ b/franka_hardware/src/franka_async_hardware_interface.cpp	2026-11-16 14:00:52.610748006 +0100
+@@ -2,6 +2,8 @@
+ #include <algorithm>
+ #include <cmath>
+ #include <exception>
++#include <sstream>
++#include <vector>
+ 
+ #include <franka/exception.h>
+ #include <Eigen/Core>
+@@ -45,6 +47,23 @@
+   std::string value_lower = param_value->second;
+   return std::stod(value_lower);
+ }
++// (robot-station patch) A list of doubles ("20, 20, 18"): empty if the parameter is not there.
++std::vector<double> getListHardwareParameter(const hardware_interface::HardwareInfo& info,
++                                             const std::string& parameter_name) {
++  std::vector<double> out;
++  auto param_value = info.hardware_parameters.find(parameter_name);
++  if (param_value == info.hardware_parameters.end()) {
++    return out;
++  }
++  std::stringstream stream(param_value->second);
++  std::string item;
++  while (std::getline(stream, item, ',')) {
++    if (item.find_first_not_of(" \t") != std::string::npos) {
++      out.push_back(std::stod(item));
++    }
++  }
++  return out;
++}
+ }  // namespace
+ 
+ CallbackReturn FrankaAsyncHardwareInterface::on_init(
+@@ -69,6 +88,59 @@
+       getBoolHardwareParameter(info_, "joint_position_low_pass_filter", true);
+   robot_->setJointPositionCommandLowPassFilterActive(joint_position_low_pass_filter);
+ 
++  // (robot-station patch) The collision thresholds (the robot keeps whatever its last client set
++  // otherwise), set here: before control starts (they are refused while the robot moves).
++  // collision_{lower,upper}_torque (7, Nm), collision_{lower,upper}_force (6, N and Nm): the same
++  // for the acceleration and the nominal phases. Lower: contact is flagged; upper: a reflex.
++  {
++    auto lower_torque = getListHardwareParameter(info_, "collision_lower_torque");
++    auto upper_torque = getListHardwareParameter(info_, "collision_upper_torque");
++    auto lower_force = getListHardwareParameter(info_, "collision_lower_force");
++    auto upper_force = getListHardwareParameter(info_, "collision_upper_force");
++    if (lower_torque.size() == 7 && upper_torque.size() == 7 && lower_force.size() == 6 &&
++        upper_force.size() == 6) {
++      auto request = std::make_shared<franka_msgs::srv::SetFullCollisionBehavior::Request>();
++      std::copy(lower_torque.begin(), lower_torque.end(),
++                request->lower_torque_thresholds_acceleration.begin());
++      std::copy(upper_torque.begin(), upper_torque.end(),
++                request->upper_torque_thresholds_acceleration.begin());
++      std::copy(lower_torque.begin(), lower_torque.end(),
++                request->lower_torque_thresholds_nominal.begin());
++      std::copy(upper_torque.begin(), upper_torque.end(),
++                request->upper_torque_thresholds_nominal.begin());
++      std::copy(lower_force.begin(), lower_force.end(),
++                request->lower_force_thresholds_acceleration.begin());
++      std::copy(upper_force.begin(), upper_force.end(),
++                request->upper_force_thresholds_acceleration.begin());
++      std::copy(lower_force.begin(), lower_force.end(),
++                request->lower_force_thresholds_nominal.begin());
++      std::copy(upper_force.begin(), upper_force.end(),
++                request->upper_force_thresholds_nominal.begin());
++      try {
++        try {
++          robot_->setFullCollisionBehavior(request);
++        } catch (const franka::CommandException&) {  // (in a reflex: refused until recovered)
++          robot_->automaticErrorRecovery();
++          robot_->setFullCollisionBehavior(request);
++        }
++        RCLCPP_INFO(getLogger(), "Collision thresholds: torques %s / %s Nm, forces %s / %s",
++                    info_.hardware_parameters.at("collision_lower_torque").c_str(),
++                    info_.hardware_parameters.at("collision_upper_torque").c_str(),
++                    info_.hardware_parameters.at("collision_lower_force").c_str(),
++                    info_.hardware_parameters.at("collision_upper_force").c_str());
++      } catch (const franka::Exception& e) {
++        RCLCPP_FATAL(getLogger(), "Setting the collision thresholds: %s", e.what());
++        return CallbackReturn::ERROR;
++      }
++    } else if (!lower_torque.empty() || !upper_torque.empty() || !lower_force.empty() ||
++               !upper_force.empty()) {
++      RCLCPP_FATAL(getLogger(), "collision_*: 7 torques and 6 forces each");
++      return CallbackReturn::ERROR;
++    } else {
++      RCLCPP_WARN(getLogger(), "No collision thresholds given: the robot keeps its last ones");
++    }
++  }
++
+   // Initialize the robot communication thread
+   double lambda = getDoubleHardwareParameter(info_, "lambda", 1e-3);
+   robot_communication_thread_ = std::make_shared<RobotCommunicationThread>(robot_, lambda);
 diff -ru a/src/robot_communication_thread.cpp b/src/robot_communication_thread.cpp
---- a/franka_hardware/src/robot_communication_thread.cpp	2026-11-13 14:32:22.000000000 +0100
-+++ b/franka_hardware/src/robot_communication_thread.cpp	2026-11-13 16:41:13.906109513 +0100
+--- a/franka_hardware/src/robot_communication_thread.cpp	2026-11-16 14:00:35.756868796 +0100
++++ b/franka_hardware/src/robot_communication_thread.cpp	2026-11-13 16:41:44.000000000 +0100
 @@ -1,5 +1,8 @@
  #include <cassert>
 +#include <chrono>
