@@ -14,7 +14,9 @@ drive, without a connection of its own to the robot.
                    them at 1 kHz
   hold             an empty trajectory (the controller holds where it is)
   command_gripper  the hand only opens or closes (spec.gripper.binary):
-                   closing a franka_msgs Grasp (holds what is in between with
+                   closing a franka_msgs Grasp (from the fully open hand a
+                   homing leaves, a Move in to BACK_OFF first: a grasp from
+                   there fails) (holds what is in between with
                    `grasp_force`), opening a Move to the full width, on
                    /franka/fer_gripper/{grasp,move}; dropped while one runs and when
                    the hand is in that state already; one failing is tried
@@ -41,6 +43,8 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from .base import RobotDriver, RobotState
 
 MAX_WIDTH = 0.08     # m, both fingers
+FULL_OPEN = 0.0795   # m: wider than this the hand is where a homing leaves it (a grasp from there fails)
+BACK_OFF = 0.075     # m: closed in to this first
 GRIP_TRIES = 3       # a hand command failing is tried this many times, then it is a fault
 STATE_STALE_S = 0.5  # no joint states this long: a fault
 RECOVER_S = 10.0     # how long error recovery may take
@@ -192,6 +196,23 @@ class FrankaRos(RobotDriver):
     self.send_grip(want)
 
   def send_grip(self, want):
+    if want and self.width is not None and self.width > FULL_OPEN:
+      # A grasp from the fully open hand a homing leaves (0.0801 m) fails at once, the fingers not
+      # moving, every time: closed in a little first (a Move), then the grasp.
+      if self.move_hand.server_is_ready():
+        self.move_hand.send_goal_async(self.Move.Goal(width=BACK_OFF, speed=self.gripper_speed)).add_done_callback(
+            lambda f: self.after_back_off(f, want))
+        return
+    self.send_grip_now(want)
+
+  def after_back_off(self, future, want):
+    handle = future.result()
+    if not handle or not handle.accepted:
+      self.send_grip_now(want)
+      return
+    handle.get_result_async().add_done_callback(lambda _: self.send_grip_now(want))
+
+  def send_grip_now(self, want):
     if want:
       goal = self.Grasp.Goal(width=0.0, speed=self.gripper_speed, force=self.grasp_force)
       goal.epsilon.inner, goal.epsilon.outer = 0.005, MAX_WIDTH  # (a grasp on nothing succeeds too)
